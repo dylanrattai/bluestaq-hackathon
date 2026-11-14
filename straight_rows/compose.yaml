@@ -29,13 +29,19 @@ services:
       context: ./services/evaluator
     command: ["python", "main.py", "batch", "--dev", "--data", "/data", "--out", "/out"]
 
-  webui:
-    <<: *common
+  webui:                                           # Vite dev server w/ hot reload:  docker compose up webui
     build:
-      context: .
-      dockerfile: services/webui/Dockerfile
+      context: ./services/webui
     image: straight-rows-webui
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /app
+    ports:
+      - "127.0.0.1:5173:5173"                      # localhost only; open http://localhost:5173
+    volumes:
+      - ./services/webui:/app                      # live source, edits hot-reload
+      - /app/node_modules                          # keep the image's node_modules, not the host's
+      - ./data:/data:ro
+      - ./out:/out
     environment:
       HOME: /tmp
       DATA_DIR: /data
