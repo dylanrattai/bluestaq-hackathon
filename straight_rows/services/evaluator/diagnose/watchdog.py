@@ -254,7 +254,24 @@ class Watchdog:
             if final or a.open or (a.end is not None and now - a.end <= self.lookback):
                 cands.append(a)
         for a in cands:
-            self._relocalise(a, now, run)
+            if a.track != "stormjam":          # v2.3 P3: its own minute-level boundaries
+                self._relocalise(a, now, run)
+        # v2.3 P3: the storm-jam rule yields to a JAMMING detection the signal track already made for the same step
+        for a in cands:
+            if a.track != "stormjam" or a.state == AlarmState.RETRACTED:
+                continue
+            for o in lc.alarms.values():
+                if o is a or o.cls != "JAMMING" or o.track == "stormjam" or o.state == AlarmState.RETRACTED:
+                    continue
+                if o.state == AlarmState.WATCH or not (o.tractors & a.tractors):
+                    continue
+                s0, e0, s1, e1 = a.start, a.span_end(now), o.start, o.span_end(now)
+                inter = max(0.0, min(e0, e1) - max(s0, s1))
+                union = max(e0, e1) - min(s0, s1)
+                if union > 0 and inter / union >= 0.30:
+                    self._retract(a, now, Reason.MERGED, f"same step already detected as {o.id}")
+                    run.actions.append(f"{a.id} retracted (duplicate of {o.id})")
+                    break
         self._merge_sw(cands, now, run)
         for a in cands:
             if a.state == AlarmState.RETRACTED:

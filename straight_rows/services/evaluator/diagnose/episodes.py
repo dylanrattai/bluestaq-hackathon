@@ -654,7 +654,10 @@ class EpisodeManager:
             cj = self._map_class(rj)
             joint = {"tractors": trs_f1, "map": cj, "bf": {k: round(v, 3) for k, v in rj.bayes_factor.items()},
                      "shared": shared}
-            if cj in FARM_CLASSES and rj.bayes_factor[cj] >= self.bf_alarm:
+            n_work = sum(1 for tr in self.tractors if self._working_in(tr, *farm_span))
+            regional_ok = not (cj == "SPACE_WEATHER" and not sub and n_work >= 2 and len(trs_f1) < 2)
+            joint["regional_ok"] = regional_ok
+            if cj in FARM_CLASSES and rj.bayes_factor[cj] >= self.bf_alarm and regional_ok:
                 bf = float(rj.bayes_factor[cj])
                 if cj == "SPACE_WEATHER" and not sub:
                     tset = {tr for tr in self.tractors if self._working_in(tr, *farm_span)} | set(trs_f1)
@@ -672,6 +675,10 @@ class EpisodeManager:
                 continue
             c = per[tr]["map"]
             bf = per[tr]["bf"][c]
+            if c == "SPACE_WEATHER" and joint is not None and not joint.get("regional_ok", True):
+                # v2.3 P4: a storm is regional; with the C/N0 drop on one machine only, judge the one-machine classes
+                c = max(("EQUIPMENT_FAULT",), key=lambda k: per[tr]["bf"][k])
+                bf = per[tr]["bf"][c]
             if c not in FARM_CLASSES and c != "OTHER" and bf >= self.bf_alarm:
                 # one-machine classes stay per tractor: one detection per machine
                 out.append({"cls": c, "tractors": {tr}, "bf": float(bf), "start": per[tr]["span"][0],
@@ -778,6 +785,13 @@ class EpisodeManager:
                          "phi": round(float((k == 1).mean()), 3)}
         r = self._evaluate(ep.tr, ep.start, fd)
         bf = r.bayes_factor["SPOOFING"]
+        jam = self._spoof_under_jam(ep, b0, b1)
+        if jam is not None:
+            # v2.3 P2: under jamming the drift is lost accuracy, not a spoofer (and a spoofer makes no C/N0 drop)
+            bf = min(bf, self.bf_alarm * 0.999)
+            note = (f"position drift on {ep.tr} {hms(ep.start)}..{hms(e)} (position track {ep.id}) explained away by "
+                    f"jamming: onset inside {jam.id} and C/N0 drop F1 present")
+            jam.extra.setdefault("explained_away", {})[ep.id] = note
         groups = [{"cls": "SPOOFING", "tractors": {ep.tr}, "bf": bf, "start": ep.start, "end": e, "level": "tractor",
                    "signs": self.signs("SPOOFING", [fd], bf)}] if bf >= self.bf_alarm else []
         ep.result = {"tractors": {ep.tr: {"findings": fd, "bf": {c: round(v, 3) for c, v in r.bayes_factor.items()},
@@ -785,6 +799,19 @@ class EpisodeManager:
                      "groups": groups, "unattributed": {} if groups else {ep.tr: ("SPOOFING", bf)},
                      "prov": ("SPOOFING", bf), "span": (ep.start, e)}
         self.reconcile(ep.id, ep.alarm_ids, ep.result, now, closed, "position", ep.records, None)
+
+    def _spoof_under_jam(self, ep: SpoofEpisode, b0: int, b1: int):
+        """v2.3 P2: a JAMMING alarm on the same tractor whose span holds the position episode's onset (5 min onset
+        tolerance), with F1 present over the position episode. Not for space weather."""
+        tol = float(self.cfg["position"].get("jam_onset_tol_s", 300))
+        for a in self.eng.lifecycle.alarms.values():
+            if a.cls != "JAMMING" or a.state not in (AlarmState.ALARM, AlarmState.CONFIRMED) or ep.tr not in a.tractors:
+                continue
+            if a.start - tol <= ep.start <= a.span_end(self.now):
+                phi1, _ = self._phi(ep.tr, "F1", b0, b1)
+                if phi1 is not None and phi1 >= self.phi_min:
+                    return a
+        return None
 
     # ---- short-dip track (§6)
     def _dip_excluded(self, tr: str, s: float, e: float) -> str | None:
@@ -1076,6 +1103,10 @@ class EpisodeManager:
                 if not s.open:
                     self.classify_sub(s, now, closed=True)
             n += 1
+        for sp in self.spoofs:                 # v2.3 P2: a jam confirmed after the position episode closed
+            if sp.open or (not final and now - sp.end > lookback):
+                continue
+            self.classify_spoof(sp, now, closed=True)
         return n
 
     def finish(self, t_end: float) -> None:

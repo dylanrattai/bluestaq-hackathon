@@ -1,0 +1,189 @@
+# Straight Rows evaluator configuration.
+# Every number cites its source section in the build spec (§) or a reference [R#].
+# Nothing here was tuned on the development labels (spec §1 rule 1).
+
+participant:
+  github_handle: "TODO-DYLAN"        # ASK DYLAN: GitHub username (export warns while unchanged)
+  display_name: ""                   # optional
+repository_url: "https://github.com/TODO-DYLAN/straight-rows"   # ASK DYLAN
+timezone_local: "America/Chicago"
+
+window:                               # §3.3 evaluation window (confirmed by starter README and validator)
+  start: "2026-05-06T00:00:00+00:00"
+  end: "2026-05-07T00:00:00+00:00"
+
+columns:                              # §3.1 DISCOVERED from data/farm/tractor_telemetry.csv.gz header
+  ts: ts
+  tractor: tractor_id
+  lat: lat
+  lon: lon
+  speed: speed_mps                    # suffix _mps -> metres per second (detected from the name)
+  xte: cross_track_error_m            # suffix _m   -> metres (detected from the name)
+  sats: num_sats
+  cn0_mean: mean_cn0_dbhz
+  cn0_min: min_cn0_dbhz
+  fix: fix_state
+  link: base_link_ok                  # True = link_ok, False = link_down
+
+min_valid_frac: 0.5                   # §3.1 a batch with < 50% valid samples gives no information
+
+validator_path: "../../submission/validate_submission.py"   # §4; /submission/validate_submission.py in Docker
+
+grid:
+  batch_s: 30                         # §5, §7.1
+  watchdog_every_batches: 10          # §5 every 5 min of data time
+
+gate:                                 # §7.1
+  park_speed_mps: 0.5
+  park_min_s: 300
+  work_min_s: 30
+  tod_work_local: ["06:00", "21:00"]  # fallback only when speed is missing (logged)
+  hold_fix_rank: 3                    # hold the last state while fix_rank >= 3 or F8 active
+
+reference:                            # §7.2
+  trailing_min: 60
+  min_clean_batches: 30
+  max_age_min: 60                     # v2 §2: does not apply while a farm episode holds the level references frozen
+  sigma_inflation_cap: 3.0            # AR(1) inflation capped at 3 sigma [R9]
+  sigma_floor:                        # numerical floors: 1 Hz quantisation (0.1 dB, 1 mm) averaged over a batch
+    cn0: 0.02                         # dB
+    logvar: 0.02
+    xte: 0.002                        # m
+
+cusum:                                # §7.2 [R1, R2]
+  k: 0.5
+  arl0_hours: 24                      # h solved from Siegmund at startup (ARL0 = 2880 batches -> h ~ 6.8)
+  reset_z: 0.5                        # F11 closes when the extra drop is back within k sigma of the previous in-event level
+  recovered_band_z: 2.0               # a batch back inside +-2 sigma of the pre-event reference ends the event at once
+  in_event_warmup_batches: 2          # Fix 1: in-event reference starts after the first 2 batches
+  stacked_max_rise_batches: 2         # Fix 3: a stacked drop counts as a step (F11) only if its CUSUM crosses h within 2 batches
+                                      # of leaving 0 (abrupt); a slower rise is the event deepening and just re-references
+
+findings:                             # §7.4
+  equal_drop_db: 3.0                  # F3
+  unequal_drop_db: 6.0                # F4: one distance doubling under inverse-square spreading
+  dip:                                # F5 finite moving-average test [R4] on min C/N0 and mean C/N0 (Fix 6)
+    ma_window_s: 5
+    max_len_s: 60
+    min_drop_db: 3.0
+    min_sigma: 4.0
+    sats_tolerance: 1                 # mean-C/N0 channel only
+    local_ref_s: 120                  # local reference: rolling 2-min median ...
+    local_lag_s: 30                   # ... ending 30 s before the sample
+  link_window_s: 300                  # F7 (Fix 5): trailing 5-min window ...
+  link_down_total_s: 30               # ... with >= 30 s of link_down in total
+  link_outages_min: 3                 # ... or >= 3 separate outages
+  link_down_min_s: 10                 # evidence text threshold
+  link_fix_window_s: 240              # F7: a fix drop 0-4 min after link loss is the link's fault [R20, R21]
+  sats_drop: 2                        # F6: satellites >= 2 below the reference median
+  fix_frac: 0.5                       # F6: fix_rank >= 1 for > 50% of the batch
+  cn0_normal_z: 2.0                   # F6: |z(mean C/N0)| < 2
+  turn_heading_deg: 30                # F8: samples at headland turns are excluded (heading derived from lat/lon)
+  turn_after_s: 12                    # v2.1 §1: turn batches extend 12 s past the turn (dev background: turn dips end +10 s, 99th pct)
+  f9: {kp: 7, dst: -100, s4: 0.3}     # F9 thresholds [R14, R11, R13]
+  rfi:                                # F10 (§3.2)
+    default_radius_km: 10
+    assumed_delay_min: 30             # no publish field in rfi_reports.json -> available at event time + 30 min
+    match_window_min: 30              # a report with a single timestamp covers +-30 min (the guide's own 10-30 min timing uncertainty)
+    use_report_confidence: true       # severity = the report's confidence field when present, else 1.0
+  advisory:
+    default_hours: 24                 # validity when the text gives no duration (logged)
+    duration_pick: min                # "24-48 h" -> 24 h: an advisory is context, the indices and S4 carry the real-time picture
+
+sda:                                  # §3.2 cadences; a feed is missing after 2x its cadence without a record
+  kp_cadence_min: 180
+  dst_cadence_min: 60
+  s4_cadence_min: 15
+  stale_factor: 2
+
+ladders:                              # §7.3 L0..L4, s = L/4
+  dcn0_db:      {edges: [1, 3, 10, 15], direction: up}           # [R16]
+  cn0_abs_dbhz: {edges: [40, 35, 30, 25], direction: down, inclusive: false}   # [R15] fallback only
+  fix_rank:     {edges: [1, 2, 3, 4], direction: up}             # [R18]
+  sats:         {edges: [6, 6, 5, 4], direction: down, inclusive: false}       # [R19] >=6 L0, 5 L2, 4 L3, <=3 L4
+  corr_age_s:   {edges: [2, 10, 60, 240], direction: up}         # [R20, R21]
+  xte_abs_m:    {edges: [0.025, 0.05, 0.15, 0.30], direction: up}  # [R18] fallback only
+  s4:           {edges: [0.1, 0.3, 0.6, 0.9], direction: up}     # [R12, R13]
+  kp:           {edges: [5, 7, 8, 9], direction: up}             # [R14]
+  dst_nt:       {edges: [-30, -100, -200, -350], direction: down, inclusive: true}  # [R11]
+
+fusion:                               # §7.5 [R22-R27]
+  prior: 0.01
+  leak_default: 0.025
+  leak_f9: 0.20
+  bf_watch: 3                         # "positive" [R27]
+  bf_alarm: 20                        # "strong" [R27]
+  floor: 0.4                          # p' = p * (floor + (1 - floor) * s)
+  causes: [SPACE_WEATHER, JAMMING, SPOOFING, EQUIPMENT_FAULT, MULTIPATH, OTHER]
+  links:                              # P(finding | cause alone), QMR five-level scale [R24]; blank = no link
+    F1:  {SPACE_WEATHER: 0.80, JAMMING: 0.985, SPOOFING: 0.025, EQUIPMENT_FAULT: 0.20, MULTIPATH: 0.025, OTHER: 0.20}
+    F2:  {SPACE_WEATHER: 0.50, JAMMING: 0.50, EQUIPMENT_FAULT: 0.20, OTHER: 0.20}   # v2.1: SW 0.025 -> 0.50, S4 IS C/N0 intensity fluctuation [R12, R13] and the guide says "elevated scintillation"; the farm-level sum (§4) counts F2 per tractor. EQUIP 0.20: an intermittent antenna/cable makes C/N0 noisy
+    F3:  {SPACE_WEATHER: 0.80, JAMMING: 0.20}
+    F4:  {SPACE_WEATHER: 0.025, JAMMING: 0.80}
+    F5:  {JAMMING: 0.50, EQUIPMENT_FAULT: 0.20, MULTIPATH: 0.985, OTHER: 0.20}   # Fix 6: pulsed/swept jammers make short dips [R4]
+    F6:  {SPACE_WEATHER: 0.50, JAMMING: 0.025, SPOOFING: 0.025, EQUIPMENT_FAULT: 0.80, OTHER: 0.20}
+    F7:  {EQUIPMENT_FAULT: 0.80}      # Fix 5: no other class cuts the separate correction data link
+    F8:  {SPOOFING: 0.985, OTHER: 0.20}
+    F9:  {SPACE_WEATHER: 0.80}
+    F10: {JAMMING: 0.50}
+    # F11 is no longer a network finding (v2 §8): a stacked step opens a sub-episode instead (§4)
+    F12: {SPACE_WEATHER: 0.025, JAMMING: 0.20, SPOOFING: 0.80, EQUIPMENT_FAULT: 0.80, MULTIPATH: 0.80, OTHER: 0.20}  # Fix 2: machine-specific
+
+episodes:                             # Update v2 §2-§4: the episode is the unit of decision
+  open_m: 2                           # a tractor episode opens when A holds in 2 of the last 3 batches [R28]
+  open_n: 3
+  close_batches: 10                   # ... and closes after 10 consecutive A-false batches (5 min): bridges pulsed sources
+  phi_present: 0.333                  # an episode finding is present when it holds in >= 1/3 of the episode's batches
+  phi_f12_other_max: 0.1              # F12: every other working tractor had F1 in < 10% of the batches
+  flicker_min_events: 3               # F6 flicker clause: >= 3 satellite drop-and-recover events while F12 holds
+  stacked_min_tractors: 2             # §4: the in-event step CUSUM fires on >= 2 tractors ...
+  stacked_window_batches: 2           # ... within 2 batches of each other
+
+position:                             # Update v2 §5
+  jam_onset_tol_s: 300               # v2.3 P2: a position episode whose onset is within a JAMMING span (+-5 min) with F1 is not exported
+  float_band_m: 0.5                   # RTK float: only batch medians above the float tier's nominal 0.5 m accuracy accumulate [R18]
+
+dips:                                 # Update v2 §6
+  exclusion_s: 60                     # no signal or spoof episode open on the tractor within +-60 s of the dip
+  set_change_s: 5                     # no min-C/N0 dip within +-5 s of a satellite count change
+  f12_pad_s: 10                       # F12: other working tractors' mean C/N0 within 2 sigma over the dip +-10 s
+
+watchdog:                             # §7.7
+  margin_min: 10                      # boundary search +-10 min
+  lookback_min: 60
+  merge_gap_min: {SPACE_WEATHER: 30}  # v2 §7: only consecutive SPACE_WEATHER episodes merge; the others bridge 5 min via the close rule
+  min_batches: 2                      # shorter -> NOT_SUSTAINED (MULTIPATH exempt)
+  min_step_sigma: 4.0                 # a re-localised change must be >= 4 sigma of the 1 Hz residual (same bar as F5)
+  parked_frac_retract: 1.0            # entirely parked -> PARKED
+
+site_multipath:                       # ACCURACY_UPDATE v2.3 P1: recurring site multipath = suppressed MULTIPATH reports
+  enabled: true
+  sites: multipath_sites.yaml         # learned on dev by tools/fit_sites.py (frozen)
+  ref_window_s: 360                   # ref = median min C/N0 over [t-360 s, t-60 s]
+  ref_lag_s: 60
+  smooth_samples: 3                   # deficit = 3-sample trailing mean of ref - min C/N0
+  deficit_db: 5.0
+  min_s: 5
+  max_s: 60
+  speed_mps: 1.0                      # working samples only
+  cell_deg: 0.0002                    # site grid
+  min_passes: 20
+  min_rate: 0.5
+  max_detections: 500                 # total exported detections in the evaluation window
+
+storm_jam:                            # ACCURACY_UPDATE v2.3 P3: jammer switching on inside a storm (1-min mean C/N0)
+  enabled: true
+  ref_minutes: 20                     # trailing 20-min median
+  ref_max_dbhz: 40.0                  # the reference is already depressed
+  step_db: 6.0                        # ref - now >= 6 dB ...
+  min_tractors: 2                     # ... on >= 2 tractors ...
+  min_minutes: 3                      # ... for >= 3 consecutive minutes
+  recover_db: 3.0                     # close: every member within 3 dB of its frozen ref ...
+  recover_minutes: 2                  # ... for 2 minutes
+
+confidence:                           # CONFIDENCE_UPDATE v2.2: reporting only, never gates a detection
+  table: confidence_table.yaml        # frozen by tools/fit_confidence.py from the v2.1-physics dev run; missing -> BF/(1+BF)
+
+api:
+  watchdog_history: 20
+  ui_poll_ms: 2000

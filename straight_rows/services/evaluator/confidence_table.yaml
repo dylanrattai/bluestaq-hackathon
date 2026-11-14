@@ -1,24 +1,24 @@
 what: confidence table v2.3 (frozen; eval and live read it, never the dev labels)
 source:
-  config_sha: 5a1ad8718f7077e9
+  config_sha: 85c34565803afdb8
   telemetry_sha: c9409c132d42b9ff
   labels_sha: 13ee82e146261066
   units_hash: 186b39757be02478
-  run_hash: b2a8fabf00a85c7f
+  run_hash: 60c33d0ed2b55d86
 leak_target: 0.2
 clip:
 - 0.02
 - 0.97
 detection_prior:
-  hits: 9
+  hits: 10
   n: 10
-  p: 0.833333
-lr_weight: 0.5
+  p: 0.916667
+lr_weight: 1.0
 lr_weight_grid_logloss:
-  '0.0': 0.4194
-  '0.25': 0.389226
-  '0.5': 0.385934
-  '1.0': 0.395995
+  '0.0': 0.094311
+  '0.25': 0.068445
+  '0.5': 0.054942
+  '1.0': 0.049522
 groups:
   G1:
     name: C/N0

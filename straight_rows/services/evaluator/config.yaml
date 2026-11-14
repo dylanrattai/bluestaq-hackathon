@@ -140,6 +140,7 @@ episodes:                             # Update v2 §2-§4: the episode is the un
   stacked_window_batches: 2           # ... within 2 batches of each other
 
 position:                             # Update v2 §5
+  jam_onset_tol_s: 300               # v2.3 P2: a position episode whose onset is within a JAMMING span (+-5 min) with F1 is not exported
   float_band_m: 0.5                   # RTK float: only batch medians above the float tier's nominal 0.5 m accuracy accumulate [R18]
 
 dips:                                 # Update v2 §6
@@ -169,6 +170,16 @@ site_multipath:                       # ACCURACY_UPDATE v2.3 P1: recurring site 
   min_passes: 20
   min_rate: 0.5
   max_detections: 500                 # total exported detections in the evaluation window
+
+storm_jam:                            # ACCURACY_UPDATE v2.3 P3: jammer switching on inside a storm (1-min mean C/N0)
+  enabled: true
+  ref_minutes: 20                     # trailing 20-min median
+  ref_max_dbhz: 40.0                  # the reference is already depressed
+  step_db: 6.0                        # ref - now >= 6 dB ...
+  min_tractors: 2                     # ... on >= 2 tractors ...
+  min_minutes: 3                      # ... for >= 3 consecutive minutes
+  recover_db: 3.0                     # close: every member within 3 dB of its frozen ref ...
+  recover_minutes: 2                  # ... for 2 minutes
 
 confidence:                           # CONFIDENCE_UPDATE v2.2: reporting only, never gates a detection
   table: confidence_table.yaml        # frozen by tools/fit_confidence.py from the v2.1-physics dev run; missing -> BF/(1+BF)

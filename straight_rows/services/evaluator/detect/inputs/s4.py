@@ -30,11 +30,14 @@ def f9_at(sda: SdaFeeds, cfg: dict[str, Any], ladders: Ladders, now: float) -> d
         levels.append(ladders["s4"].level(s4.value) or 0)
         if s4.value >= thr["s4"]:
             hits.append(f"S4 {s4.value:g}")
+    measured = bool(hits)
     if adv:
         levels.append(2)
         hits.append("advisory " + ",".join(a.id for a in adv))
     missing = kp.missing and dst.missing and s4.missing and not adv
-    present = bool(hits)
+    # v2.3 P4: an advisory is context; F9 needs a measured index (Kp, Dst or S4) past its threshold, unless every
+    # index feed is stale (then the advisory is all there is)
+    present = measured or (bool(adv) and kp.missing and dst.missing and s4.missing)
     level = max(levels) if (present and levels) else 0
     return {"present": present, "level": level, "missing": missing, "hits": hits,
             "kp": kp.value, "dst": dst.value, "s4": s4.value, "kp_ts": kp.ts, "dst_ts": dst.ts, "s4_ts": s4.ts,

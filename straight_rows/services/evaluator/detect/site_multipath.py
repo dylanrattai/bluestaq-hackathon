@@ -45,25 +45,42 @@ def deficit(series, p: dict) -> tuple[np.ndarray, np.ndarray]:
     return d, working
 
 
+def _runs(on: np.ndarray) -> list[tuple[int, int]]:
+    edges = np.diff(np.concatenate([[0], on.astype(np.int8), [0]]))
+    return list(zip(np.nonzero(edges == 1)[0], np.nonzero(edges == -1)[0]))      # [start, end)
+
+
 def find_dips(tele, tr: str, p: dict) -> list[dict]:
+    """Dips on the deficit; inside a deficit run longer than max_s (a level step, e.g. a storm onset that the 6-min
+    reference has not caught up with), dips are looked for again against the run's own recent level: the deficit
+    minus its median over [t - 60 s, t - 15 s] (causal), same threshold and duration limits."""
     s = tele.series[tr]
     d, working = deficit(s, p)
-    on = working & ~np.isnan(d) & (d > p["thr"])
-    n = len(on)
+    d2 = d - pd.Series(d).rolling(46, min_periods=23).median().shift(15).to_numpy()
+    n = len(d)
+    ok = working & ~np.isnan(d)
     out = []
-    if not on.any():
-        return out
-    edges = np.diff(np.concatenate([[0], on.astype(np.int8), [0]]))
-    starts, ends = np.nonzero(edges == 1)[0], np.nonzero(edges == -1)[0]        # run = [start, end)
     t = tele.t
-    for a, z in zip(starts, ends):
+
+    def emit(a, z, dd, nested):
         dur = int(z - a)
         if z >= n or dur < p["min_s"] or dur > p["max_s"]:
-            continue                                     # still running at the end of the data, or not a dip
-        k = a + int(np.nanargmax(d[a:z]))
+            return                                       # still running at the end of the data, or not a dip
+        k = a + int(np.nanargmax(dd[a:z]))
         out.append({"tractor": tr, "i0": int(a), "i1": int(z), "start": float(t[a]), "end": float(t[z - 1]) + 1.0,
-                    "known_t": float(t[z]), "peak_t": float(t[k]), "depth_db": float(d[k]), "dur_s": dur,
+                    "known_t": float(t[z]), "peak_t": float(t[k]), "depth_db": float(dd[k]), "dur_s": dur, "nested": nested,
                     "lat": float(s.lat[k]), "lon": float(s.lon[k]), "cell": cell_of(float(s.lat[k]), float(s.lon[k]), p["cell"])})
+
+    for a, z in _runs(ok & (d > p["thr"])):
+        if z - a <= p["max_s"]:
+            emit(a, z, d, False)
+            continue
+        sub = np.zeros(n, dtype=bool)
+        sub[a:z] = ~np.isnan(d2[a:z]) & (d2[a:z] > p["thr"])
+        for a2, z2 in _runs(sub):
+            if z2 < z:                                   # must end inside the long run (its end is then known)
+                emit(a2, z2, d2, True)
+    out.sort(key=lambda x: x["start"])
     return out
 
 

@@ -219,6 +219,14 @@ geometry (equal vs unequal drops, other machines unaffected), solution impact (f
 IDs and availability times, and the decision (the episode's class, Bayes factor and the episode-level findings
 with their fractions, re-localisation).
 
+**ACCURACY_UPDATE v2.3.** *Site multipath*: a learned map of recurring min-C/N0 dip sites (the north headland turn,
+`multipath_sites.yaml`, dev only) turns each dip peaking there into a one-tractor MULTIPATH report with confidence =
+the site's dip rate (≤ 0.95); they are ISA-18.2 suppressed alerts (not in `/alarms` unless `include_suppressed=1`).
+*No spoof under jam*: a position episode whose onset falls in a JAMMING detection on the same tractor (±5 min) with
+F1 present is explained away. *Jam inside a storm*: a ≥ 6 dB flat step of 1-min mean C/N0 on a ≤ 40 dB-Hz floor on
+≥ 2 tractors for ≥ 3 min is its own JAMMING detection. *Storm rules*: SPACE_WEATHER needs F1 on ≥ 2 tractors; an
+advisory alone does not make F9. Dev: 37.5/40 (strict multipath-duplicate reading), 40.0 (lenient).
+
 ## 5. Use of labelled data
 
 `data/labels/train_episodes.json` (12 labelled episodes in the development period, 2026-05-04/05) is read by two

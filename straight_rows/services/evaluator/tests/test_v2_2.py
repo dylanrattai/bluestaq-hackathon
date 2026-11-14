@@ -1,6 +1,7 @@
 """CONFIDENCE_UPDATE v2.2 §6. Tests 1 and 6 replay the real dev data (skipped when it is not present); 5 is covered
 by test_api's batch/live determinism and test_lifecycle's causality truncation, which run with the table loaded."""
 import itertools
+import math
 import json
 from pathlib import Path
 
@@ -13,7 +14,7 @@ HERE = Path(__file__).resolve().parent.parent
 ROOT = HERE.parent.parent
 TABLE = HERE / "confidence_table.yaml"
 DATA = ROOT / "data"
-BACKUP = ROOT / "backups" / "v2_1_physics" / "submission.json"
+BACKUP = ROOT / "backups" / "v2_3_final" / "submission.json"    # the accepted detections (v2.3 changed them on purpose)
 real = pytest.mark.skipif(not (DATA / "labels").is_dir() or not TABLE.is_file(), reason="real data or table missing")
 
 
@@ -54,12 +55,16 @@ def test_v22_4_monotone(table):
         for g in groups_for(c):
             p, br = confidence(c, states(c, {g: "absent"}), table)
             assert br["raw_logodds"] < br_all["raw_logodds"]
-            assert p < p_all, (c, g, p, p_all)
+            # the evidence strictly drops; the reported P (0.97 clip, 2-decimal rounding) never rises and drops
+            # whenever it is not pinned near the clip
+            assert p <= p_all, (c, g, p, p_all)
+            if p_all < CLIP[1]:
+                assert p < p_all, (c, g, p, p_all)
 
 
 # 1 ------------------------------------------------------------------------------------------------------------
 @real
-@pytest.mark.skipif(not BACKUP.is_file(), reason="v2.1-physics backup missing")
+@pytest.mark.skipif(not BACKUP.is_file(), reason="accepted backup missing")
 def test_v22_1_detections_unchanged(tmp_path):
     from main import main
     rc = main(["batch", "--data", str(DATA), "--out", str(tmp_path), "--log-level", "ERROR"])

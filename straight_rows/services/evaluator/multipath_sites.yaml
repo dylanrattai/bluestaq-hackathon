@@ -16,8 +16,8 @@ telemetry_sha: c9409c132d42b9ff
 n_cells_seen: 1708
 n_sites: 189
 site_passes: 7854
-site_dips: 7378
-north_headland_rate: 0.9447
+site_dips: 7430
+north_headland_rate: 0.9514
 south_headland_rate: 0.0224
 sites:
 - cell:
@@ -120,8 +120,8 @@ sites:
   - -97.203
   - -97.2028
   passes: 66
-  dips: 58
-  rate: 0.8788
+  dips: 60
+  rate: 0.9091
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -165,8 +165,8 @@ sites:
   - -97.2024
   - -97.2022
   passes: 63
-  dips: 58
-  rate: 0.9206
+  dips: 60
+  rate: 0.9524
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -225,8 +225,8 @@ sites:
   - -97.2016
   - -97.2014
   passes: 63
-  dips: 57
-  rate: 0.9048
+  dips: 58
+  rate: 0.9206
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -345,8 +345,8 @@ sites:
   - -97.2
   - -97.1998
   passes: 77
-  dips: 72
-  rate: 0.9351
+  dips: 73
+  rate: 0.9481
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -360,8 +360,8 @@ sites:
   - -97.1998
   - -97.1996
   passes: 33
-  dips: 32
-  rate: 0.9697
+  dips: 33
+  rate: 1.0
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -375,8 +375,8 @@ sites:
   - -97.1996
   - -97.1994
   passes: 33
-  dips: 28
-  rate: 0.8485
+  dips: 29
+  rate: 0.8788
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -390,8 +390,8 @@ sites:
   - -97.1994
   - -97.1992
   passes: 66
-  dips: 60
-  rate: 0.9091
+  dips: 61
+  rate: 0.9242
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -615,8 +615,8 @@ sites:
   - -97.1964
   - -97.1962
   passes: 63
-  dips: 59
-  rate: 0.9365
+  dips: 61
+  rate: 0.9683
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -630,8 +630,8 @@ sites:
   - -97.1962
   - -97.196
   passes: 34
-  dips: 29
-  rate: 0.8529
+  dips: 30
+  rate: 0.8824
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -645,8 +645,8 @@ sites:
   - -97.196
   - -97.1958
   passes: 32
-  dips: 28
-  rate: 0.875
+  dips: 29
+  rate: 0.9062
   median_depth_db: null
   peak_dips: 0
   name: recurring site
@@ -825,8 +825,8 @@ sites:
   - -97.203
   - -97.2028
   passes: 66
-  dips: 60
-  rate: 0.9091
+  dips: 62
+  rate: 0.9394
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -870,8 +870,8 @@ sites:
   - -97.2024
   - -97.2022
   passes: 63
-  dips: 59
-  rate: 0.9365
+  dips: 61
+  rate: 0.9683
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -915,8 +915,8 @@ sites:
   - -97.2018
   - -97.2016
   passes: 32
-  dips: 29
-  rate: 0.9062
+  dips: 30
+  rate: 0.9375
   median_depth_db: 6.33
   peak_dips: 1
   name: north headland turn
@@ -930,8 +930,8 @@ sites:
   - -97.2016
   - -97.2014
   passes: 63
-  dips: 59
-  rate: 0.9365
+  dips: 60
+  rate: 0.9524
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -1050,8 +1050,8 @@ sites:
   - -97.2
   - -97.1998
   passes: 89
-  dips: 83
-  rate: 0.9326
+  dips: 84
+  rate: 0.9438
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -1065,8 +1065,8 @@ sites:
   - -97.1998
   - -97.1996
   passes: 33
-  dips: 32
-  rate: 0.9697
+  dips: 33
+  rate: 1.0
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -1080,8 +1080,8 @@ sites:
   - -97.1996
   - -97.1994
   passes: 33
-  dips: 28
-  rate: 0.8485
+  dips: 29
+  rate: 0.8788
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -1095,8 +1095,8 @@ sites:
   - -97.1994
   - -97.1992
   passes: 66
-  dips: 60
-  rate: 0.9091
+  dips: 61
+  rate: 0.9242
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -1320,8 +1320,8 @@ sites:
   - -97.1964
   - -97.1962
   passes: 63
-  dips: 59
-  rate: 0.9365
+  dips: 61
+  rate: 0.9683
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -1335,8 +1335,8 @@ sites:
   - -97.1962
   - -97.196
   passes: 34
-  dips: 29
-  rate: 0.8529
+  dips: 30
+  rate: 0.8824
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -1350,8 +1350,8 @@ sites:
   - -97.196
   - -97.1958
   passes: 32
-  dips: 28
-  rate: 0.875
+  dips: 29
+  rate: 0.9062
   median_depth_db: null
   peak_dips: 0
   name: north headland turn
@@ -1530,10 +1530,10 @@ sites:
   - -97.203
   - -97.2028
   passes: 66
-  dips: 60
-  rate: 0.9091
-  median_depth_db: 9.65
-  peak_dips: 10
+  dips: 62
+  rate: 0.9394
+  median_depth_db: 9.8
+  peak_dips: 11
   name: north headland turn
 - cell:
   - 234534
@@ -1575,8 +1575,8 @@ sites:
   - -97.2024
   - -97.2022
   passes: 63
-  dips: 59
-  rate: 0.9365
+  dips: 61
+  rate: 0.9683
   median_depth_db: 9.63
   peak_dips: 10
   name: north headland turn
@@ -1620,8 +1620,8 @@ sites:
   - -97.2018
   - -97.2016
   passes: 32
-  dips: 29
-  rate: 0.9062
+  dips: 30
+  rate: 0.9375
   median_depth_db: 9.2
   peak_dips: 7
   name: north headland turn
@@ -1635,8 +1635,8 @@ sites:
   - -97.2016
   - -97.2014
   passes: 63
-  dips: 59
-  rate: 0.9365
+  dips: 60
+  rate: 0.9524
   median_depth_db: 10.07
   peak_dips: 9
   name: north headland turn
@@ -1755,8 +1755,8 @@ sites:
   - -97.2
   - -97.1998
   passes: 86
-  dips: 84
-  rate: 0.9767
+  dips: 85
+  rate: 0.9884
   median_depth_db: 9.67
   peak_dips: 14
   name: north headland turn
@@ -1770,10 +1770,10 @@ sites:
   - -97.1998
   - -97.1996
   passes: 33
-  dips: 32
-  rate: 0.9697
-  median_depth_db: 9.83
-  peak_dips: 5
+  dips: 33
+  rate: 1.0
+  median_depth_db: 9.9
+  peak_dips: 6
   name: north headland turn
 - cell:
   - 234534
@@ -1785,10 +1785,10 @@ sites:
   - -97.1996
   - -97.1994
   passes: 33
-  dips: 28
-  rate: 0.8485
-  median_depth_db: 8.97
-  peak_dips: 3
+  dips: 29
+  rate: 0.8788
+  median_depth_db: 9.28
+  peak_dips: 4
   name: north headland turn
 - cell:
   - 234534
@@ -1800,8 +1800,8 @@ sites:
   - -97.1994
   - -97.1992
   passes: 66
-  dips: 60
-  rate: 0.9091
+  dips: 61
+  rate: 0.9242
   median_depth_db: 9.9
   peak_dips: 16
   name: north headland turn
@@ -2025,8 +2025,8 @@ sites:
   - -97.1964
   - -97.1962
   passes: 63
-  dips: 59
-  rate: 0.9365
+  dips: 61
+  rate: 0.9683
   median_depth_db: 9.9
   peak_dips: 10
   name: north headland turn
@@ -2040,10 +2040,10 @@ sites:
   - -97.1962
   - -97.196
   passes: 34
-  dips: 30
-  rate: 0.8824
-  median_depth_db: 10.17
-  peak_dips: 3
+  dips: 31
+  rate: 0.9118
+  median_depth_db: 11.87
+  peak_dips: 4
   name: north headland turn
 - cell:
   - 234534
@@ -2055,8 +2055,8 @@ sites:
   - -97.196
   - -97.1958
   passes: 32
-  dips: 28
-  rate: 0.875
+  dips: 29
+  rate: 0.9062
   median_depth_db: 9.7
   peak_dips: 5
   name: north headland turn
@@ -2235,8 +2235,8 @@ sites:
   - -97.203
   - -97.2028
   passes: 33
-  dips: 30
-  rate: 0.9091
+  dips: 31
+  rate: 0.9394
   median_depth_db: 9.38
   peak_dips: 24
   name: north headland turn
@@ -2280,10 +2280,10 @@ sites:
   - -97.2024
   - -97.2022
   passes: 32
-  dips: 30
-  rate: 0.9375
-  median_depth_db: 9.42
-  peak_dips: 20
+  dips: 31
+  rate: 0.9688
+  median_depth_db: 9.43
+  peak_dips: 21
   name: north headland turn
 - cell:
   - 234535
@@ -2325,8 +2325,8 @@ sites:
   - -97.2018
   - -97.2016
   passes: 32
-  dips: 29
-  rate: 0.9062
+  dips: 30
+  rate: 0.9375
   median_depth_db: 9.8
   peak_dips: 7
   name: north headland turn
@@ -2340,10 +2340,10 @@ sites:
   - -97.2016
   - -97.2014
   passes: 63
-  dips: 59
-  rate: 0.9365
-  median_depth_db: 9.8
-  peak_dips: 19
+  dips: 60
+  rate: 0.9524
+  median_depth_db: 9.77
+  peak_dips: 20
   name: north headland turn
 - cell:
   - 234535
@@ -2460,8 +2460,8 @@ sites:
   - -97.2
   - -97.1998
   passes: 85
-  dips: 82
-  rate: 0.9647
+  dips: 83
+  rate: 0.9765
   median_depth_db: 9.52
   peak_dips: 20
   name: north headland turn
@@ -2475,8 +2475,8 @@ sites:
   - -97.1998
   - -97.1996
   passes: 33
-  dips: 32
-  rate: 0.9697
+  dips: 33
+  rate: 1.0
   median_depth_db: 9.2
   peak_dips: 11
   name: north headland turn
@@ -2490,8 +2490,8 @@ sites:
   - -97.1996
   - -97.1994
   passes: 33
-  dips: 28
-  rate: 0.8485
+  dips: 29
+  rate: 0.8788
   median_depth_db: 9.97
   peak_dips: 10
   name: north headland turn
@@ -2505,8 +2505,8 @@ sites:
   - -97.1994
   - -97.1992
   passes: 66
-  dips: 60
-  rate: 0.9091
+  dips: 61
+  rate: 0.9242
   median_depth_db: 10.03
   peak_dips: 15
   name: north headland turn
@@ -2730,10 +2730,10 @@ sites:
   - -97.1964
   - -97.1962
   passes: 33
-  dips: 31
-  rate: 0.9394
-  median_depth_db: 9.9
-  peak_dips: 22
+  dips: 32
+  rate: 0.9697
+  median_depth_db: 10.0
+  peak_dips: 23
   name: north headland turn
 - cell:
   - 234535
@@ -2745,8 +2745,8 @@ sites:
   - -97.1962
   - -97.196
   passes: 34
-  dips: 30
-  rate: 0.8824
+  dips: 31
+  rate: 0.9118
   median_depth_db: 9.42
   peak_dips: 10
   name: north headland turn
@@ -2760,8 +2760,8 @@ sites:
   - -97.196
   - -97.1958
   passes: 32
-  dips: 28
-  rate: 0.875
+  dips: 29
+  rate: 0.9062
   median_depth_db: 9.93
   peak_dips: 11
   name: north headland turn

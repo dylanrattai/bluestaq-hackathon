@@ -19,6 +19,7 @@ from detect.inputs import cn0, cross_track, fix, link, s4
 from detect.inputs.ctx import Ctx
 from diagnose.episodes import EpisodeManager
 from detect.site_multipath import SiteMultipath
+from detect.storm_jam import StormJam
 from diagnose.lifecycle import Lifecycle
 from ingest.load import SdaFeeds, Telemetry, load_sda, load_telemetry
 from core.log import EventSink, iso
@@ -83,6 +84,7 @@ class Engine:
         self.post_hist = {tr: np.zeros((self.nb, len(self.fusion.causes)), dtype=np.float32) for tr in self.tractors}
         self.episodes = EpisodeManager(self)
         self.site = SiteMultipath(self)             # v2.3 P1: recurring site multipath (suppressed alerts)
+        self.storm_jam = StormJam(self)             # v2.3 P3: a jammer switching on inside a storm
         self.b_done = 0
         self.now = float(self.t0s[0])
         self.last_results: dict[str, Any] = {}
@@ -138,6 +140,7 @@ class Engine:
         # episodes first, causes second
         self.episodes.step(b, t0, now, findings)
         self.site.step(now)
+        self.storm_jam.step(b, now)
         ctx.prev_present = {k: v.present for k, v in ctx.out.items()}
         self.last_results = results
         self.last_findings = findings
@@ -219,6 +222,13 @@ class Engine:
 
     def build_all_evidence(self, now: float) -> None:
         for a in self.lifecycle.alarms.values():
+            if a.track == "stormjam":
+                ev = list(a.extra.get("ev") or [f"JAMMING step on a depressed floor from {iso(a.start)} (still open)",
+                                                 "concurrent with the storm detection"])
+                if (a.extra.get("conf") or {}).get("line"):
+                    ev.append(a.extra["conf"]["line"])
+                a.evidence = ev
+                continue
             if a.records:
                 try:
                     a.evidence = build_evidence(a, self.feats, self.tele, self.sda, self.ladders, self.cfg, now)

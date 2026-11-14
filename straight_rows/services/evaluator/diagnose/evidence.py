@@ -234,6 +234,11 @@ def _decision(a: Alarm) -> str:
                 pres.append(f"{fid} {phi:.0%}" if isinstance(phi, (int, float)) else fid)
         bits.append(f"{tr} {per[tr].get('map', a.cls)} BF {per[tr].get('bf', {}).get(a.cls, a.bf):.0f} on " + (", ".join(pres) or "nothing"))
     kind = {"signal": "signal episode", "sub": "stacked-step sub-episode", "position": "position-track episode"}.get(a.track, "episode")
+    expl = a.extra.get("explained_away") or {}
+    if ep.get("level") == "farm" and expl:
+        jt = (ep.get("joint") or {}).get("tractors") or []
+        return (f"{kind} {ep.get('id', a.episode)}: {a.cls} BF {a.bf:.0f} decided once for the farm over {','.join(jt)}; "
+                + "; ".join(expl[k] for k in sorted(expl)))
     if ep.get("level") == "farm":
         jt = (ep.get("joint") or {}).get("tractors") or []
         dec = (f"{kind} {ep.get('id', a.episode)}: {a.cls} BF {a.bf:.0f} decided once for the farm over "

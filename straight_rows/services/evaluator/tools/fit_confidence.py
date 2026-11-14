@@ -115,7 +115,7 @@ def main(argv=None) -> int:
     tab = fit_table(units, links)
     # ---------------------------------------------------------------- dev detections (hit = matched, same class)
     dev0, dev1 = float(eng.t0s[0]), float(cfg["window"]["start_s"])
-    alarms = [a for a in eng.lifecycle.alarms.values() if a.state == AlarmState.CONFIRMED and a.cls in ACTIONS
+    alarms = [a for a in eng.lifecycle.alarms.values() if a.state == AlarmState.CONFIRMED and a.cls in ACTIONS and a.track != "site"
               and a.start < dev1 and a.span_end(eng.now) > dev0]
     dets = [{"id": a.id, "s": max(a.start, dev0), "e": min(a.span_end(eng.now), dev1), "tractors": sorted(a.tractors),
              "class": a.cls} for a in alarms]
