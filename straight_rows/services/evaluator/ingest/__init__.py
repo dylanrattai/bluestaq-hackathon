@@ -1,0 +1,1 @@
+"""Straight Rows evaluator package."""

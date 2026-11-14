@@ -2,10 +2,16 @@
 name = "straight-rows"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-# Pinned to the versions in the organizers' starter/requirements.txt.
+# Same pins as services/evaluator/requirements.txt (recorded from what resolved on 2026-11-14).
 dependencies = [
     "numpy==2.3.3",
     "pandas==2.3.3",
+    "PyYAML==6.0.3",
+    "rich==15.0.0",
+    "fastapi==0.162.7",
+    "uvicorn==0.54.0",
+    "httpx==0.28.1",
+    "pytest==9.2.0",
 ]
 
 [tool.uv]

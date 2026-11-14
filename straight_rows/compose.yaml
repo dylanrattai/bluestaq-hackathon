@@ -1,21 +1,33 @@
 x-common: &common
   user: "${HOST_UID:-1000}:${HOST_GID:-1000}"     # files written to ./out belong to you, not root
-  working_dir: /app
-  environment:
-    HOME: /tmp
-    DATA_DIR: /data
-    OUT_DIR: /app/out
+  volumes:
+    - ./data:/data:ro                              # dataset is mounted, never baked into the image
+    - ./out:/out
+    - ./submission:/submission:ro
 
 services:
-  evaluator:
+  evaluator:                                       # paced live replay + API:  docker compose up evaluator
     <<: *common
     build:
-      context: .
-      dockerfile: services/evaluator/Dockerfile
-    image: straight-rows-evaluator
-    volumes:
-      - ./data:/data:ro                           # dataset is mounted, never baked into the image
-      - ./out:/app/out
+      context: ./services/evaluator
+    image: straight-rows
+    ports:
+      - "127.0.0.1:8000:8000"                      # localhost only; open http://localhost:8000/ui
+    command: ["python", "main.py", "live", "--data", "/data", "--out", "/out", "--speed", "60", "--port", "8000"]
+
+  batch:                                           # regenerate out/submission.json:  docker compose run --rm batch
+    <<: *common
+    image: straight-rows
+    build:
+      context: ./services/evaluator
+    command: ["python", "main.py", "batch", "--data", "/data", "--out", "/out"]
+
+  dev:                                             # score against the dev labels:  docker compose run --rm dev
+    <<: *common
+    image: straight-rows
+    build:
+      context: ./services/evaluator
+    command: ["python", "main.py", "batch", "--dev", "--data", "/data", "--out", "/out"]
 
   webui:
     <<: *common
@@ -23,8 +35,8 @@ services:
       context: .
       dockerfile: services/webui/Dockerfile
     image: straight-rows-webui
-    ports:
-      - "127.0.0.1:8000:8000"                     # localhost only
-    volumes:
-      - ./data:/data:ro
-      - ./out:/app/out:ro                         # reads what the evaluator wrote
+    working_dir: /app
+    environment:
+      HOME: /tmp
+      DATA_DIR: /data
+      OUT_DIR: /out
