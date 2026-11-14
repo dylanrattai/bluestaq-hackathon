@@ -3,7 +3,7 @@ from main import EvaluationResult
 
 LinkType = Literal["link_down", "link_ok"]
 
-def get_evaluation(link_history: list[LinkType]) -> EvaluationResult:
+def get_evaluation(all_link_history: dict[str, list[LinkType]]) -> EvaluationResult:
     """
     Evaluates the link history and returns an EvaluationResult.
 
@@ -12,7 +12,7 @@ def get_evaluation(link_history: list[LinkType]) -> EvaluationResult:
     - If any link is "link_down", the equipment_fault category is set to 1, others remain 0.
 
     Args:
-        link_history (list[LinkType]): A list of link statuses, either "link_down" or "link_ok".
+        all_link_history (dict[str, list[LinkType]]): A dictionary mapping link names to their history of statuses.
 
     Returns:
         EvaluationResult: The evaluation result based on the link history.
@@ -21,9 +21,10 @@ def get_evaluation(link_history: list[LinkType]) -> EvaluationResult:
         ValueError: If the link_history is empty.
     """
 
-    if not link_history:
-        raise ValueError("link_history cannot be empty")
+    if not all_link_history:
+        raise ValueError("all_link_history cannot be empty")
 
+    link_history = [status for history in all_link_history.values() for status in history]
     if all(link == "link_ok" for link in link_history):
         return EvaluationResult(
             space_weather=0,
