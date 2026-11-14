@@ -93,3 +93,10 @@ def test_webui_hooks(client):                    # webui hook: /status position 
     m = client.get("/webui/meta").json()
     assert m["tractors"] == ["T1", "T2", "T3"] and m["fusion"]["bf_alarm"] == 20
     assert m["fusion"]["links"]["F1"]["JAMMING"] == 0.985 and m["window"]["start"]
+
+
+def test_webui_control(client, eng):            # webui hook: playback controls never rewind
+    r = client.post("/webui/control", json={"speed": 600}).json()
+    assert r["ok"] and r["speed"] == 600 and eng.speed == 600
+    assert client.post("/webui/control", json={"speed": "max"}).json()["speed"] == "max" and eng.speed is None
+    assert client.post("/webui/control", json={"seek": "2000-01-01T00:00:00Z"}).json()["ok"] is False

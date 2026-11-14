@@ -1,10 +1,10 @@
 what: confidence table v2.3 (frozen; eval and live read it, never the dev labels)
 source:
-  config_sha: 85c34565803afdb8
+  config_sha: b92db0aee7abe62e
   telemetry_sha: c9409c132d42b9ff
   labels_sha: 13ee82e146261066
   units_hash: 186b39757be02478
-  run_hash: 60c33d0ed2b55d86
+  run_hash: 10e2d850683460f6
 leak_target: 0.2
 clip:
 - 0.02

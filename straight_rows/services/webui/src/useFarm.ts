@@ -1,9 +1,9 @@
 // One hook feeds both pages. LIVE: polls the evaluator API (proxied by Vite, see vite.config.ts).
 // DEMO: if the API is unreachable, replays public/demo/snapshot.json and keeps probing for the API.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { demoAlarms, demoFeed, demoStatus, demoWatchdog, matchDetection, ms, prepare, trail, type Replay } from './demo'
+import { demoAlarms, demoFeed, demoPath, demoStatus, demoWatchdog, matchDetection, ms, prepare, trail, type Replay } from './demo'
 import { normAlarm, normAlarms, normFeed, normStatus, normWatchdog } from './normalize'
-import type { Alarm, FeedItem, Meta, Mode, Snapshot, Status, WatchdogRun } from './types'
+import type { Alarm, FeedItem, HistPt, Meta, Mode, Snapshot, Status, WatchdogRun } from './types'
 
 const POLL_MS = 2000
 const ALARM_POLL_MS = 5000
@@ -36,15 +36,38 @@ export interface Farm {
   alarms: Alarm[]
   watchdog: WatchdogRun[]
   feed: FeedItem[]
-  trails: Record<string, [number, number][]>
+  trails: Record<string, HistPt[]>            // C/N0 history for the card sparklines
+  paths: Record<string, [number, number, number][]>   // map paths [t ms, lat, lon], 10 s
   replay: Replay | null            // recorded run, used by DEMO and by the walkthroughs in both modes
   now: number                      // data time, ms
-  demo: { playing: boolean; speed: number; setPlaying: (p: boolean) => void; setSpeed: (s: number) => void; seek: (t: number) => void }
+  playback: Playback
+  forcedReplay: boolean            // API is live but the user rewound: showing the recorded run
   loadAlarm: (a: Alarm) => Promise<Alarm>
 }
 
+export interface Playback {
+  live: boolean                    // controls drive the evaluator (POST /webui/control) instead of the local clock
+  playing: boolean
+  setPlaying: (p: boolean) => void
+  speed: number | null             // data seconds per wall second; null = max
+  setSpeed: (v: number | null) => void
+  seek: (t: number) => void        // LIVE: forward = skip ahead, backward = switch to the recorded run
+  seekTarget: number | null
+  backToLive: () => void
+}
+
+async function postJson(url: string, body: unknown) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  return r.json() as Promise<Record<string, unknown>>
+}
+
+const DEMO_MAX = 7200
+
 export function useFarm(): Farm {
-  const [mode, setMode] = useState<Mode>('connecting')
+  const [apiMode, setMode] = useState<Mode>('connecting')
+  const [forcedReplay, setForcedReplay] = useState(false)
+  const [seekTarget, setSeekTarget] = useState<number | null>(null)
+  const mode: Mode = apiMode === 'live' && forcedReplay ? 'demo' : apiMode
   const [error, setError] = useState<string | null>(null)
   const [meta, setMeta] = useState<Meta | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
@@ -52,11 +75,12 @@ export function useFarm(): Farm {
   const [watchdog, setWatchdog] = useState<WatchdogRun[]>([])
   const [feed, setFeed] = useState<FeedItem[]>([])
   const [replay, setReplay] = useState<Replay | null>(null)
-  const [trails, setTrails] = useState<Record<string, [number, number][]>>({})
+  const [trails, setTrails] = useState<Record<string, HistPt[]>>({})
+  const [paths, setPaths] = useState<Record<string, [number, number, number][]>>({})
   const [demoT, setDemoT] = useState(0)
   const [playing, setPlaying] = useState(true)
   const [speed, setSpeed] = useState(600)            // data seconds per wall second
-  const liveTrails = useRef<Record<string, [number, number][]>>({})
+  const liveTrails = useRef<Record<string, HistPt[]>>({})
 
   useEffect(() => { void loadSnapshot().then(setReplay) }, [])
 
@@ -75,9 +99,9 @@ export function useFarm(): Farm {
       }
     }
     void probe()
-    const id = setInterval(() => { if (mode !== 'live') void probe() }, PROBE_MS)
+    const id = setInterval(() => { if (apiMode !== 'live') void probe() }, PROBE_MS)
     return () => { dead = true; clearInterval(id) }
-  }, [mode])
+  }, [apiMode])
 
   // LIVE polling
   useEffect(() => {
@@ -90,14 +114,17 @@ export function useFarm(): Farm {
         fails = 0
         const s = normStatus(st)
         setStatus(s); setWatchdog((wd as Record<string, unknown>[]).map(normWatchdog)); setFeed(normFeed(fd))
+        const tNow = ms(s.data_time)
         for (const t of s.tractors) {
           if (t.lat == null || t.lon == null) continue
           const tr = (liveTrails.current[t.id] ??= [])
           const last = tr[tr.length - 1]
-          if (!last || last[0] !== t.lat || last[1] !== t.lon) tr.push([t.lat, t.lon])
+          if (last && tNow < last.t) tr.length = 0          // replay restarted
+          if (!last || last.t !== tNow) tr.push({ t: tNow, lat: t.lat, lon: t.lon, cn0: t.cn0 })
           if (tr.length > TRAIL_MAX) tr.splice(0, tr.length - TRAIL_MAX)
         }
         setTrails({ ...liveTrails.current })
+        setPaths(Object.fromEntries(s.tractors.map((t) => [t.id, (t.trail ?? []).map(([ts, la, lo]) => [ts * 1000, la, lo] as [number, number, number])])))
       } catch (e) {
         if (++fails >= 3 && !dead) { setError(String(e)); setMode('demo') }
       }
@@ -116,9 +143,9 @@ export function useFarm(): Farm {
   // DEMO clock
   useEffect(() => {
     if (mode !== 'demo' || !replay) return
-    setMeta(replay.snap.meta)
+    if (!forcedReplay) setMeta(replay.snap.meta)
     setDemoT((t) => (t ? t : replay.t0 + 36 * 3600e3))   // start mid-run (05-05 12:00Z) so there is history to see
-  }, [mode, replay])
+  }, [mode, replay, forcedReplay])
   useEffect(() => {
     if (mode !== 'demo' || !replay || !playing) return
     // 4 Hz is plenty: at 600x one tick is 2.5 min of data time, and every tick re-renders the timeline
@@ -140,6 +167,7 @@ export function useFarm(): Farm {
     setWatchdog(wd)
     setFeed(demoFeed(replay, demoT))
     setTrails(Object.fromEntries(replay.snap.meta.tractors.map((tr) => [tr, trail(replay, tr, demoT)])))
+    setPaths(Object.fromEntries(replay.snap.meta.tractors.map((tr) => [tr, demoPath(replay, tr, demoT)])))
   }, [mode, replay, demoT])
 
   const loadAlarm = useCallback(async (a: Alarm): Promise<Alarm> => {
@@ -147,13 +175,35 @@ export function useFarm(): Farm {
       try { return normAlarm(await getJson<Record<string, unknown>>(`/alarms/${encodeURIComponent(a.id)}`)) } catch { return a }
     }
     const d = replay ? matchDetection(replay.snap.submission, a) : undefined
-    return { ...a, evidence: d?.evidence ?? replay?.final.get(a.id)?.evidence ?? a.evidence }
+    const fin = replay?.final.get(a.id)
+    return { ...a, evidence: d?.evidence ?? fin?.evidence ?? a.evidence, conf: fin?.conf ?? a.conf }
   }, [mode, replay])
 
   const now = mode === 'demo' ? demoT : status ? ms(status.data_time) : NaN
+  // a skip-ahead target is done once data time reaches it
+  useEffect(() => { if (seekTarget != null && (mode !== 'live' || now >= seekTarget)) setSeekTarget(null) }, [seekTarget, now, mode])
+
+  const live = mode === 'live'
+  const liveSpeed = status ? (status.speed === 'max' ? null : Number(status.speed)) : null
+  const playback: Playback = {
+    live,
+    playing: live ? true : playing,
+    setPlaying,
+    speed: live ? liveSpeed : speed >= DEMO_MAX ? null : speed,
+    setSpeed: (v) => {
+      if (live) void postJson('/webui/control', { speed: v ?? 'max' })
+      else setSpeed(v ?? DEMO_MAX)
+    },
+    seek: (t) => {
+      if (!live) { setDemoT(t); return }
+      if (t > now) { setSeekTarget(t); void postJson('/webui/control', { seek: new Date(t).toISOString() }) }
+      else { setDemoT(t); setForcedReplay(true); setPlaying(true) }
+    },
+    seekTarget,
+    backToLive: () => { setForcedReplay(false); setDemoT(0) },
+  }
   return {
-    mode, error, meta, status, alarms, watchdog, feed, trails, replay, now,
-    demo: { playing, speed, setPlaying, setSpeed, seek: (t) => setDemoT(t) },
+    mode, error, meta, status, alarms, watchdog, feed, trails, paths, replay, now, playback, forcedReplay,
     loadAlarm,
   }
 }

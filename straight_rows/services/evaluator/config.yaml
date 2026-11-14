@@ -183,6 +183,8 @@ storm_jam:                            # ACCURACY_UPDATE v2.3 P3: jammer switchin
 
 confidence:                           # CONFIDENCE_UPDATE v2.2: reporting only, never gates a detection
   table: confidence_table.yaml        # frozen by tools/fit_confidence.py from the v2.1-physics dev run; missing -> BF/(1+BF)
+  method: hypothesis                  # v2.4: score the hypothesis, + per supporting finding, - per finding against (diagnose/confidence.py)
+  hypothesis: {scale: 0.5, cap_group: 3, rival_ratio: 0.5, rival_pts: 1, clip: [0.05, 0.95], quorum: 0.5}
 
 api:
   watchdog_history: 20

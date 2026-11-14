@@ -1,5 +1,5 @@
 // The only place API field names are mapped. If the evaluator's JSON changes, edit here.
-import type { Alarm, AlarmState, Cls, FeedItem, OpenEpisode, Status, TractorStatus, WatchdogRun } from './types'
+import type { Alarm, AlarmState, Cls, ConfInfo, FeedItem, OpenEpisode, Status, TractorStatus, WatchdogRun } from './types'
 
 type Raw = Record<string, unknown>
 const s = (v: unknown): string | null => (v == null ? null : String(v))
@@ -26,6 +26,7 @@ export function normAlarm(r: Raw): Alarm {
     episode: s(r.episode),
     evidence: r.evidence ? arr(r.evidence) : undefined,
     history: r.history ? arr(r.history) : undefined,
+    conf: (r.conf as ConfInfo | undefined) ?? ((r.extra as Raw | undefined)?.conf as ConfInfo | undefined) ?? null,
   }
 }
 
@@ -40,6 +41,7 @@ function normTractor(id: string, v: Raw): TractorStatus {
     working: v.state ? v.state === 'WORKING' : Boolean(v.working),
     lat: n(v.lat), lon: n(v.lon),
     cn0: n(v.cn0 ?? v.mean_cn0), cn0_min: n(v.cn0_min), sats: n(v.sats), fix: s(v.fix),
+    trail: Array.isArray(v.trail) ? (v.trail as [number, number, number][]) : null,
     speed: n(v.speed), link_ok: v.link_ok == null ? null : Boolean(v.link_ok),
     present: (v.present as Record<string, number>) ?? (v.findings as Record<string, number>) ?? null,
     missing: v.missing ? arr(v.missing) : null,

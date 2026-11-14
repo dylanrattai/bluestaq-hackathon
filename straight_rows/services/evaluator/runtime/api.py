@@ -114,6 +114,11 @@ def create_app(eng: Engine) -> FastAPI:
         from runtime import webui
         return webui.meta(eng.cfg, eng.tele, eng.sda, eng.out_dir)
 
+    @app.post("/webui/control")                 # webui hook: playback speed / skip ahead (LIVE only; never rewinds)
+    def webui_control(body: dict):
+        from runtime import webui
+        return webui.control(eng, body.get("speed"), body.get("seek"))
+
     @app.get("/ui", response_class=HTMLResponse)
     def ui():
         return UI_HTML.replace("__POLL__", str(int(eng.cfg.get("api", {}).get("ui_poll_ms", 2000))))

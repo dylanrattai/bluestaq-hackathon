@@ -178,4 +178,13 @@ class SiteMultipath:
             "Mean C/N0, RTK fix and cross-track unaffected at this site on dev → site multipath, not a guidance fault; continue",
             f"P={a.confidence:.2f} = (site dips + 1)/(site passes + 2), capped at 0.95 (recurrence is not proof of attribution)",
         ]
+        if self.eng.hyp_mode():
+            # v2.4: the recurring site is one witness for MULTIPATH; the findings over the dip argue for or against.
+            # F5 (a short dip) is present by construction: this detector found it.
+            rate = float(c["rate"])
+            rec = 2 if rate >= 0.9 else (1 if rate >= 0.7 else 0)
+            a.extra["hyp_extra"] = [(f"site recurrence {rate:.0%}", rec)] if rec else []
+            a.extra["hyp_force"] = {"F5": {"present": True, "sev": 0.5, "missing": False}}
+            self.eng.set_hypothesis_confidence(a, now)
+            a.evidence[-1] = a.extra["conf"]["line"]
         self.reported.append({"alarm": a.id, **{k: v for k, v in d.items() if k != "cell"}, "cell": list(d["cell"])})

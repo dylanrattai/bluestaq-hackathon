@@ -41,12 +41,26 @@ def _last_finite(a: np.ndarray, i: int, back: int = 30) -> float | None:
     return float(seg[ok[-1]]) if ok.size else None
 
 
-def tractor_now(tele, tr: str, now: float) -> dict[str, Any]:
-    """Latest 1 Hz sample at data time `now` (data <= now only)."""
+TRAIL_MIN, TRAIL_STEP_S = 20, 10        # map path: last 20 min at 10 s (a tractor covers ~45 m per step, so rows stay rows)
+
+
+def trail(tele, tr: str, now: float, minutes: int = TRAIL_MIN, every_s: int = TRAIL_STEP_S) -> list[list[float]]:
+    """[[epoch_s, lat, lon], ...] for the last `minutes` of data <= now, oldest first."""
+    i1 = int(np.searchsorted(tele.t, now, side="right")) - 1
+    if i1 < 0:
+        return []
+    s = tele.series[tr]
+    idx = np.arange(i1, max(0, i1 - minutes * 60) - 1, -every_s)[::-1]
+    ok = np.isfinite(s.lat[idx]) & np.isfinite(s.lon[idx])
+    return [[int(tele.t[i]), round(float(s.lat[i]), 6), round(float(s.lon[i]), 6)] for i in idx[ok]]
+
+
+def tractor_now(tele, tr: str, now: float, with_trail: bool = True) -> dict[str, Any]:
+    """Latest 1 Hz sample at data time `now` (data <= now only), plus the recent path for the map."""
     i = int(np.searchsorted(tele.t, now, side="right")) - 1
     if i < 0:
         return {"lat": None, "lon": None, "cn0": None, "cn0_min": None, "sats": None, "fix": None, "speed": None,
-                "link_ok": None}
+                "link_ok": None, "xte": None, **({"trail": []} if with_trail else {})}
     s = tele.series[tr]
     fr = _last_finite(s.fix_rank, i)
     lk = _last_finite(s.link_ok, i)
@@ -54,7 +68,9 @@ def tractor_now(tele, tr: str, now: float) -> dict[str, Any]:
             "cn0": _num(_last_finite(s.cn0, i), 1), "cn0_min": _num(_last_finite(s.cn0_min, i), 1),
             "sats": None if (v := _last_finite(s.sats, i)) is None else int(v),
             "fix": None if fr is None else FIX_NAME.get(int(fr), str(fr)),
-            "speed": _num(_last_finite(s.speed, i), 2), "link_ok": None if lk is None else bool(lk)}
+            "speed": _num(_last_finite(s.speed, i), 2), "link_ok": None if lk is None else bool(lk),
+            "xte": _num(_last_finite(s.xte, i), 3),
+            **({"trail": trail(tele, tr, now)} if with_trail else {})}
 
 
 def _fields(tele, cfg: dict[str, Any]) -> list[dict[str, Any]]:
@@ -124,16 +140,90 @@ def meta(cfg: dict[str, Any], tele, sda, out_dir: str | Path | None = None) -> d
         "site_multipath": _sites(cfg),
         "site_cap": int((cfg.get("site_multipath") or {}).get("max_detections", 500)),
         "scores": _scores(Path(out_dir) if out_dir else None),
+        "confidence": _confidence_meta(cfg),
     }
 
 
+def _confidence_meta(cfg: dict[str, Any]) -> dict[str, Any]:
+    """How `confidence` is computed, so the UI can explain each number (reporting only; never gates a detection)."""
+    from diagnose import confidence as C
+    cc = cfg.get("confidence") or {}
+    out: dict[str, Any] = {"method": cc.get("method") or "table",
+                           "groups": {g: {"name": n, "findings": list(f)} for g, (n, f) in C.GROUPS.items()}}
+    if getattr(C, "HYP_DEFAULTS", None) is not None:
+        out["hypothesis"] = {**C.HYP_DEFAULTS, **(cc.get("hypothesis") or {})}
+    t = C.load_table(cfg, HERE)
+    if t:
+        out["table"] = {"detection_prior": t.get("detection_prior"), "lr_weight": t.get("lr_weight"), "clip": t.get("clip"),
+                        "classes": {c: {"prior": r.get("prior"), "groups": {g: {k: v for k, v in x.items() if k in ("name", "signs", "p1", "p0", "k1", "n1", "k0", "n0")}
+                                                                            for g, x in (r.get("groups") or {}).items()}}
+                                    for c, r in (t.get("classes") or {}).items()}}
+    return out
+
+
+# ---------------------------------------------------------------- playback controls (LIVE mode only)
+# The engine is causal and stateful, so it can go faster, slower or skip ahead, never back.
+def control(eng, speed: Any = None, seek: str | None = None) -> dict[str, Any]:
+    """POST /webui/control. speed: data seconds per wall second (number) or "max"; seek: ISO time to skip ahead to."""
+    from core.config import parse_iso
+    out: dict[str, Any] = {"ok": True}
+    if speed is not None:
+        v = None if str(speed).lower() in ("max", "inf", "0") else float(speed)
+        eng.speed = None if v is None or v <= 0 else v
+        eng.webui_wake = True
+        out["speed"] = "max" if eng.speed is None else eng.speed
+    if seek is not None:
+        t = parse_iso(seek)
+        if t <= eng.now:
+            out.update(ok=False, reason="the live engine cannot rewind; use the recorded replay")
+        else:
+            eng.webui_seek_to = t
+            eng.webui_wake = True
+            out["seek_to"] = iso(t)
+    return out
+
+
+def fast_forward(eng, now: float) -> bool:
+    """Engine._pace hook: True (skip pacing) while a seek target is ahead; re-anchors the pace once reached."""
+    tgt = getattr(eng, "webui_seek_to", None)
+    if tgt is None:
+        return False
+    if now < tgt:
+        return True
+    eng.webui_seek_to = None
+    eng.wall_start = None
+    return False
+
+
+def pace_changed(eng) -> bool:
+    """Engine._pace hook: a speed change or seek ends the current wait and re-anchors the pace."""
+    if getattr(eng, "webui_wake", False):
+        eng.webui_wake = False
+        eng.wall_start = None
+        return True
+    return False
+
+
 # ---------------------------------------------------------------- DEMO snapshot (offline; never reads labels)
-def _track(tele, every_s: int = 120) -> dict[str, list]:
+def _track(tele, every_s: int = 60) -> dict[str, list]:
     t = tele.t
     idx = np.arange(0, len(t), every_s)
     out: dict[str, list] = {"t": [iso(t[i]) for i in idx]}
     for tr in tele.tractors:
-        out[tr] = [tractor_now(tele, tr, float(t[i])) for i in idx]
+        out[tr] = [tractor_now(tele, tr, float(t[i]), with_trail=False) for i in idx]
+    return out
+
+
+def _path(tele, every_s: int = TRAIL_STEP_S) -> dict[str, Any]:
+    """Whole-run map path at 10 s, as integer micro-degree offsets from an origin (keeps the snapshot small)."""
+    lat0 = float(np.nanmean(np.concatenate([tele.series[tr].lat for tr in tele.tractors])))
+    lon0 = float(np.nanmean(np.concatenate([tele.series[tr].lon for tr in tele.tractors])))
+    out: dict[str, Any] = {"t0": int(tele.t[0]), "step_s": every_s, "lat0": round(lat0, 6), "lon0": round(lon0, 6)}
+    for tr in tele.tractors:
+        s = tele.series[tr]
+        la, lo = s.lat[::every_s], s.lon[::every_s]
+        enc = lambda a, o: [None if not np.isfinite(v) else int(round((v - o) * 1e6)) for v in a]
+        out[tr] = {"lat": enc(la, lat0), "lon": enc(lo, lon0)}
     return out
 
 
@@ -159,9 +249,11 @@ def write_snapshot(cfg: dict[str, Any], data_dir: Path, scores_dir: Path | None,
         d = a.summary(t_end)
         d["suppressed"] = bool(a.extra.get("suppressed"))
         d["evidence"] = list(a.evidence)
+        if a.extra.get("conf"):
+            d["conf"] = {k: a.extra["conf"].get(k) for k in ("p", "br", "line")}
         alarms.append(d)
     sub = build_submission(list(eng.lifecycle.alarms.values()), cfg, t_end)
-    snap = {"meta": meta(cfg, eng.tele, eng.sda, scores_dir), "track": _track(eng.tele),
+    snap = {"meta": meta(cfg, eng.tele, eng.sda, scores_dir), "track": _track(eng.tele), "path": _path(eng.tele),
             "events": [{k: e[k] for k in keep if k in e} for e in events],
             "alarms": alarms, "submission": sub["detections"]}
     dest.mkdir(parents=True, exist_ok=True)

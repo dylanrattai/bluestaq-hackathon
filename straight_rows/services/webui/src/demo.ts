@@ -2,7 +2,7 @@
 // `python -m runtime.webui`) on a client-side clock. Alarm states at time t are the last logged event <= t,
 // so the replay shows exactly what the engine logged, never anything it did not.
 import { normAlarm } from './normalize'
-import type { Alarm, Detection, FeedItem, Snapshot, Status, TractorStatus, WatchdogRun } from './types'
+import type { Alarm, Detection, FeedItem, HistPt, Snapshot, Status, TractorStatus, WatchdogRun } from './types'
 
 export const ms = (iso: string | null | undefined) => (iso ? Date.parse(iso) : NaN)
 
@@ -28,8 +28,8 @@ function cutoff(r: Replay, t: number): number {
   return lo
 }
 
-type Sample = { lat: number | null; lon: number | null; cn0: number | null; cn0_min: number | null; sats: number | null; fix: string | null; speed: number | null; link_ok: boolean | null }
-const samples = (r: Replay, tr: string) => r.snap.track[tr] as Sample[]
+export type Sample = { lat: number | null; lon: number | null; cn0: number | null; cn0_min: number | null; sats: number | null; fix: string | null; speed: number | null; link_ok: boolean | null; xte?: number | null }
+export const samples = (r: Replay, tr: string) => r.snap.track[tr] as Sample[]
 
 export function trackIndex(r: Replay, t: number) {
   return Math.max(0, Math.min(r.snap.track.t.length - 1, Math.floor((t - r.trackT0) / r.trackStep)))
@@ -72,7 +72,7 @@ export function demoAlarms(r: Replay, t: number): Alarm[] {
     const end = retracted ? (e.end as string) : fin?.end && ms(fin.end) <= t ? fin.end : (e.end as string | null) && ms(e.end as string) <= t ? (e.end as string) : null
     return normAlarm({ alarm_id: id, class: e.cls, state: e.to, start: e.start, end, tractors: e.tractors,
       confidence: end && !retracted && fin ? fin.confidence : e.confidence, reason: retracted ? e.reason : null, open: end == null && !retracted, history: h,
-      track: fin?.track, suppressed: fin?.suppressed, evidence: fin?.evidence,
+      track: fin?.track, suppressed: fin?.suppressed, evidence: fin?.evidence, conf: fin?.conf,
       episode: h.find((x) => x.episode)?.episode ?? null })
   })
 }
@@ -98,10 +98,28 @@ export function matchDetection(dets: Detection[], a: Alarm): Detection | undefin
   return dets.find((d) => d.class === a.cls && ms(d.start) < e && ms(d.end) > s && d.tractors.some((x) => a.tractors.includes(x)))
 }
 
-export function trail(r: Replay, tr: string, t: number, spanMs = 2 * 3600e3): [number, number][] {
+export function trail(r: Replay, tr: string, t: number, spanMs = 2 * 3600e3): HistPt[] {
   const i1 = trackIndex(r, t), i0 = trackIndex(r, t - spanMs)
-  const out: [number, number][] = []
+  const out: HistPt[] = []
   const xs = samples(r, tr)
-  for (let i = i0; i <= i1; i++) if (xs[i].lat != null && xs[i].lon != null) out.push([xs[i].lat!, xs[i].lon!])
+  for (let i = i0; i <= i1; i++) {
+    const x = xs[i]
+    if (x.lat != null && x.lon != null) out.push({ t: r.trackT0 + i * r.trackStep, lat: x.lat, lon: x.lon, cn0: x.cn0 })
+  }
+  return out
+}
+
+/** Map path for the last `spanMs` from the snapshot's 10 s path (falls back to the 1-min track). */
+export function demoPath(r: Replay, tr: string, t: number, spanMs = 20 * 60e3): [number, number, number][] {
+  const p = r.snap.path
+  const enc = p?.[tr] as { lat: (number | null)[]; lon: (number | null)[] } | undefined
+  if (!p || !enc) return trail(r, tr, t, spanMs).map((x) => [x.t, x.lat, x.lon])
+  const stepMs = p.step_s * 1000, t0 = p.t0 * 1000
+  const i1 = Math.min(enc.lat.length - 1, Math.floor((t - t0) / stepMs)), i0 = Math.max(0, Math.floor((t - spanMs - t0) / stepMs))
+  const out: [number, number, number][] = []
+  for (let i = i0; i <= i1; i++) {
+    const la = enc.lat[i], lo = enc.lon[i]
+    if (la != null && lo != null) out.push([t0 + i * stepMs, p.lat0 + la / 1e6, p.lon0 + lo / 1e6])
+  }
   return out
 }

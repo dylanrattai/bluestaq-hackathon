@@ -13,6 +13,10 @@ React + TypeScript (Vite) front end for the evaluator's HTTP API. It has two pag
   4. Limits & research: weaknesses, led by multipath; the dev score table; references.
 
   Keys: `1`–`4` switch tabs, `Q`/`W`/`E` jump to a walkthrough, and `←`/`→` or space step through it.
+  Deep links for presenting: `#/extended?tab=2&s=e&step=3` (tab 1–4, scenario q/w/e, step from 1).
+
+The visual style follows the original `ui.html` / `ui_extended.html` mock-ups. Their scripted content was replaced
+with the engine's real tables, recorded episodes and logged Bayes factors.
 
 ## Run
 
@@ -53,7 +57,7 @@ Every hook is read-only and marked `webui hook` in the code:
 | where | what |
 |---|---|
 | `runtime/webui.py` (new) | `tractor_now` (position and receiver state at data time), `meta` (window, field outline from the 1st–99th percentile of moving samples, RFI reports with availability times, the live fusion tables, multipath sites, dev scores), and the snapshot writer |
-| `runtime/engine.py` `snapshot()` | adds `lat`, `lon`, `cn0`, `cn0_min`, `sats`, `fix`, `speed` and `link_ok` per tractor to `/status` |
+| `runtime/engine.py` `snapshot()` | adds `lat`, `lon`, `cn0`, `cn0_min`, `sats`, `fix`, `speed`, `link_ok` and `xte` per tractor to `/status` |
 | `runtime/api.py` | `GET /webui/meta` |
 | `tests/test_api.py` | `test_webui_hooks` |
 

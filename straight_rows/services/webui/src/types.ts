@@ -36,7 +36,10 @@ export interface Alarm {
   episode: string | null
   evidence?: string[]
   history?: HistoryEvent[]
+  conf?: ConfInfo | null      // engine's confidence breakdown (extra.conf)
 }
+
+export interface ConfInfo { p: number; br: unknown; line?: string }
 
 export interface TopBf { cause: string; bf: number; posterior: number }
 
@@ -51,6 +54,8 @@ export interface TractorStatus {
   fix: string | null
   speed: number | null
   link_ok: boolean | null
+  xte?: number | null
+  trail?: [number, number, number][] | null    // [epoch s, lat, lon], last 20 min at 10 s (webui hook)
   present: Record<string, number> | null      // finding -> severity (live only)
   missing: string[] | null
   explanation: string[] | null
@@ -146,6 +151,12 @@ export interface Meta {
     north_headland_rate: number; south_headland_rate: number; dev_end: string; sites: Site[]
   } | null
   site_cap: number
+  confidence?: {
+    method: string
+    groups: Record<string, { name: string; findings: string[] }>
+    hypothesis?: { scale: number; cap_group: number; rival_ratio: number; rival_pts: number; clip: [number, number]; quorum: number }
+    table?: { detection_prior?: { p: number; hits: number; n: number }; lr_weight?: number; clip?: [number, number]; classes?: Record<string, { prior: number; groups: Record<string, unknown> }> }
+  }
   scores: {
     headline: string | null
     lenient: string | null
@@ -169,8 +180,11 @@ export interface Snapshot {
   meta: Meta
   track: { t: string[] } & Record<string, unknown>
   events: (FeedItem & HistoryEvent & { kind: 'alarm' | 'watchdog'; final?: boolean })[]
-  alarms: (Record<string, unknown> & { alarm_id: string; end: string | null; track: string; suppressed: boolean; evidence: string[] })[]   // final state at the end of the run
+  path?: { t0: number; step_s: number; lat0: number; lon0: number } & Record<string, unknown>   // 10 s map path, micro-degree offsets
+  alarms: (Record<string, unknown> & { alarm_id: string; end: string | null; track: string; suppressed: boolean; evidence: string[]; conf?: ConfInfo })[]   // final state at the end of the run
   submission: Detection[]
 }
+
+export interface HistPt { t: number; lat: number; lon: number; cn0: number | null }
 
 export type Mode = 'connecting' | 'live' | 'demo'

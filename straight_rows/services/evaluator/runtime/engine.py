@@ -10,7 +10,8 @@ from typing import Any
 import numpy as np
 
 from detect.baseline import siegmund_arl0, solve_h
-from diagnose.confidence import confidence as conf_p, evidence_line, group_states, load_table
+from diagnose.confidence import (confidence as conf_p, evidence_line, group_states, hypothesis_line, hypothesis_score,
+                                 load_table)
 from diagnose.evidence import build_evidence
 from runtime.export import build_submission, resolve_validator, write_submission
 from runtime import webui                      # webui hook (read-only)
@@ -97,13 +98,16 @@ class Engine:
     def _pace(self, now: float) -> None:
         if self.speed is None or self.speed <= 0:
             return
+        if webui.fast_forward(self, now):   # webui hook: skip-to-time runs unpaced until the target
+            return
         if self.wall_start is None:
             self.wall_start = time.time()
             self.data_start = now
             return
         target = self.wall_start + (now - self.data_start) / self.speed
         delay = target - time.time()
-        while delay > 0 and not self.stop_event.is_set():
+        while delay > 0 and not self.stop_event.is_set() and not webui.pace_changed(self):   # webui hook: speed change wakes the wait
+
             time.sleep(min(delay, 0.25))
             delay = target - time.time()
 
@@ -187,13 +191,20 @@ class Engine:
                                                     allow_empty=bool(self.cfg.get("_allow_empty")))
 
     # ------------------------------------------------------------------ v2.2 confidence (reporting only)
+    def hyp_mode(self) -> bool:
+        return (self.cfg.get("confidence") or {}).get("method") == "hypothesis"
+
     def initial_confidence(self, cls: str, bf: float) -> float:
+        if self.hyp_mode():
+            return 0.5                                  # v2.4: undecided until findings are scored
         if self.conf_table is None or cls not in self.conf_table["classes"]:
             return round(bf / (1.0 + bf), 3)
         return round(min(max(float(self.conf_table["classes"][cls]["prior"]), 0.02), 0.97), 2)
 
     def set_confidence(self, a, now: float) -> None:
         """P from the sign groups seen so far over the alarm's own interval and tractors (causal: data <= now)."""
+        if self.hyp_mode():
+            return self.set_hypothesis_confidence(a, now)
         if self.conf_table is None or a.cls not in self.conf_table["classes"] or not a.tractors:
             return
         fds = self.episodes.span_findings(a.cls, a.start, a.span_end(now), sorted(a.tractors), sub=(a.track == "sub"))
@@ -201,6 +212,42 @@ class Engine:
         p, br = conf_p(a.cls, st, self.conf_table)
         a.confidence = p
         a.extra["conf"] = {"p": p, "br": br, "line": evidence_line(p, br), "t": now}
+
+    def set_hypothesis_confidence(self, a, now: float) -> None:
+        """v2.4: score the hypothesis "a.cls" from the findings over the alarm's span and tractors (+ for, - against)."""
+        if not a.tractors:
+            return
+        extra, force = a.extra.get("hyp_extra"), a.extra.get("hyp_force")
+        trs = sorted(a.tractors)
+        fds = list(self.episodes.span_findings(a.cls, a.start, a.span_end(now), trs, sub=(a.track == "sub")).values())
+        if force:
+            fds = [{**fd, **force} for fd in fds]
+        rival = None
+        per = ((a.extra.get("episode") or {}).get("tractors") or {})
+        ratios = []
+        for tr in trs:
+            bf = (per.get(tr) or {}).get("bf") or {}
+            own = float(bf.get(a.cls, 0.0))
+            others = {k: float(v) for k, v in bf.items() if k not in (a.cls, "OTHER")}
+            if own > 0 and others:
+                k = max(others, key=others.get)
+                ratios.append((others[k] / own, k))
+        if ratios:
+            r, k = max(ratios)
+            rival = (k, r)
+        # explaining away: confirmed detections of other classes overlapping this one in time and tractors
+        s0, e0 = a.start, a.span_end(now)
+        explained = {}
+        for o in self.lifecycle.alarms.values():
+            if (o is a or o.cls == a.cls or o.state != AlarmState.CONFIRMED or o.unattributed or o.track == "site"
+                    or not (o.tractors & a.tractors) or o.start >= e0 or o.span_end(now) <= s0):
+                continue
+            explained.setdefault(o.cls, o.id)
+        cc = self.cfg.get("confidence") or {}
+        p, br = hypothesis_score(a.cls, fds, self.cfg["fusion"]["links"], cc.get("hypothesis"), rival, extra,
+                                 explained)
+        a.confidence = p
+        a.extra["conf"] = {"p": p, "br": br, "line": hypothesis_line(p, br), "t": now}
 
     def apply_cap(self, now: float) -> None:
         """v2.3 P1: at most `site_multipath.max_detections` exported detections in the evaluation window. Over the cap,
@@ -223,6 +270,10 @@ class Engine:
 
     def build_all_evidence(self, now: float) -> None:
         for a in self.lifecycle.alarms.values():
+            if a.track == "site" and self.hyp_mode() and a.state == AlarmState.CONFIRMED and a.evidence:
+                self.set_hypothesis_confidence(a, now)      # v2.4: re-score with every overlapping detection known
+                a.evidence[-1] = a.extra["conf"]["line"]
+                continue
             if a.track == "stormjam":
                 ev = list(a.extra.get("ev") or [f"JAMMING step on a depressed floor from {iso(a.start)} (still open)",
                                                  "concurrent with the storm detection"])

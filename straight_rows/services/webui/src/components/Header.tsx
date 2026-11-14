@@ -1,36 +1,42 @@
 import type { Farm } from '../useFarm'
-import { dayTime } from '../format'
 
-const SPEEDS = [60, 300, 600, 1800, 3600]
+export const EXT_TABS = ['DATA FLOW', 'WALKTHROUGH', 'LIVE ENGINE', 'RESEARCH & LIMITS'] as const
 
-export function Header({ farm, page }: { farm: Farm; page: 'operator' | 'extended' }) {
-  const { mode, status, meta, replay, now, demo } = farm
-  const pill = mode === 'live' ? (status?.done ? 'LIVE · replay finished' : 'LIVE') : mode === 'demo' ? 'DEMO · recorded run' : 'CONNECTING'
+export function Brand({ sub }: { sub: string }) {
   return (
-    <header className="hdr">
-      <div className="hdr-title">
-        <strong>Straight Rows</strong>
-        <span className="muted">GNSS degradation watchdog {meta ? `· ${meta.version}${meta.config ? ` · ${meta.config}` : ''}` : ''}</span>
-      </div>
-      <nav className="hdr-nav">
-        <a href="#/" className={page === 'operator' ? 'on' : ''}>Operator</a>
-        <a href="#/extended" className={page === 'extended' ? 'on' : ''}>Judge view</a>
-      </nav>
-      <div className="hdr-time">
-        <span className="mono">{dayTime(now, true)}</span>
-        <div className="bar" title="replay progress"><div style={{ width: `${(status?.progress ?? 0) * 100}%` }} /></div>
-      </div>
-      <span className={`pill pill-${mode}`} title={farm.error ?? ''}>{pill}</span>
-      {mode === 'demo' && replay && (
-        <div className="demo-ctl">
-          <button onClick={() => demo.setPlaying(!demo.playing)}>{demo.playing ? 'Pause' : 'Play'}</button>
-          <select value={demo.speed} onChange={(e) => demo.setSpeed(Number(e.target.value))} title="data seconds per wall second">
-            {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
-          </select>
-          <input type="range" min={replay.t0} max={replay.t1} step={30000} value={now || replay.t0}
-            onChange={(e) => demo.seek(Number(e.target.value))} aria-label="seek data time" />
-        </div>
+    <a className="brand" href="#/">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M3 22 C10 12,20 7,30 6" stroke="#ede6d6" strokeWidth="3" fill="none" strokeLinecap="round" />
+        <path d="M5 25 C12 17,21 12,29 11" stroke="#d9a441" strokeWidth="3" fill="none" strokeLinecap="round" />
+        <path d="M8 28 C14 22,22 17,28 16" stroke="#b5763a" strokeWidth="3" fill="none" strokeLinecap="round" />
+      </svg>
+      <span className="wm">STRAIGHT<b> ROWS</b></span>
+      <span className="sub">{sub}</span>
+    </a>
+  )
+}
+
+export function Header({ farm, page, tab, setTab }: { farm: Farm; page: 'operator' | 'extended'; tab: number; setTab: (i: number) => void }) {
+  const { mode, status, meta, now } = farm
+  const iso = Number.isFinite(now) ? new Date(now).toISOString() : ''
+  return (
+    <header className={`hdr ${page === 'extended' ? 'ext-hdr' : ''}`}>
+      <Brand sub={page === 'operator' ? 'GNSS INTEGRITY · CASSELTON, ND' : 'HOW IT WORKS'} />
+      {page === 'extended' && (
+        <nav className="seg">
+          {EXT_TABS.map((t, i) => <button key={t} className={tab === i ? 'on' : ''} onClick={() => setTab(i)}><span>{i + 1}</span>{t}</button>)}
+        </nav>
       )}
+      <span className="spacer" />
+      {page === 'extended' && <span className="kbd">1–4 tabs · Q W E scenario · ← → step</span>}
+      <span className="pill" title="data time (UTC)"><span className="led" style={{ background: 'var(--gold)' }} />
+        <span>{iso ? `${iso.slice(5, 10)} ${iso.slice(11, 19)}Z` : '—'}{status ? ` · ${Math.round(status.progress * 100)}%` : ''}</span></span>
+      <span className={`pill ${mode === 'live' ? 'live' : mode === 'demo' ? 'demo' : ''}`} title={farm.error ?? ''}>
+        <span className="led" /><span>{mode === 'live' ? (status?.done ? 'LIVE · REPLAY DONE' : 'LIVE ENGINE') : farm.forcedReplay ? 'RECORDED REPLAY' : mode === 'demo' ? 'DEMO REPLAY' : 'CONNECTING'}{meta ? ` · ${meta.version}` : ''}</span>
+      </span>
+      {page === 'operator'
+        ? <a className="btn" href="#/extended">How it works →</a>
+        : <a className="btn ghost" href="#/">← Operator view</a>}
     </header>
   )
 }
