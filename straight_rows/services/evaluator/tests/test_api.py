@@ -100,3 +100,8 @@ def test_webui_control(client, eng):            # webui hook: playback controls 
     assert r["ok"] and r["speed"] == 600 and eng.speed == 600
     assert client.post("/webui/control", json={"speed": "max"}).json()["speed"] == "max" and eng.speed is None
     assert client.post("/webui/control", json={"seek": "2000-01-01T00:00:00Z"}).json()["ok"] is False
+
+
+def test_alarm_detail_is_json_safe():
+    from runtime.api import _finite
+    assert _finite({"a": float("nan"), "b": [1.0, float("inf")], "c": "x"}) == {"a": None, "b": [1.0, None], "c": "x"}

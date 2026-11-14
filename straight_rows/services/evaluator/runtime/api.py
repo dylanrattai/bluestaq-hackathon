@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import queue
 import time
 from typing import Optional
@@ -46,6 +47,19 @@ tick(); setInterval(tick,POLL);
 </script></body></html>"""
 
 
+def _finite(o):
+    """JSON has no NaN/Infinity: not-computable values (e.g. a spread over one tractor) become null."""
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {k: _finite(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_finite(v) for v in o]
+    if hasattr(o, "item") and not isinstance(o, (str, bytes)):     # numpy scalar
+        return _finite(o.item())
+    return o
+
+
 def create_app(eng: Engine) -> FastAPI:
     app = FastAPI(title="Straight Rows watchdog", version="1.0")
 
@@ -69,7 +83,7 @@ def create_app(eng: Engine) -> FastAPI:
         a = eng.alarm(alarm_id)
         if a is None:
             raise HTTPException(status_code=404, detail="unknown alarm id")
-        return a
+        return _finite(a)                       # NaN in extra.episode findings (e.g. spread with one tractor) broke JSON -> 500
 
     @app.get("/watchdog")
     def watchdog():
