@@ -206,7 +206,11 @@ def build_evidence(a: Alarm, feats: dict[str, Any], tele, sda, ladders, cfg: dic
         dec += f"; confirmed {hms(a.confirmed_at)}"
     out.append(dec)
     out = [s for s in out if s and s.strip()]
-    return out[:5] if len(out) >= 2 else (out + ["see alarm history"])[:5]
+    out = out[:5] if len(out) >= 2 else (out + ["see alarm history"])[:5]
+    conf = a.extra.get("conf")
+    if conf and conf.get("line"):
+        out.append(conf["line"])                     # v2.2: the confidence line comes on top of the existing five
+    return out
 
 
 def _decision(a: Alarm) -> str:

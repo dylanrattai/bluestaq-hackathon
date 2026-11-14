@@ -1,0 +1,292 @@
+{
+ "dev_score": 29.535714285714285,
+ "n": 10,
+ "brier_new": 0.27202000000000004,
+ "brier_old": 0.0994243,
+ "bins": [
+  {
+   "bin": "[0.02, 0.5)",
+   "count": 4,
+   "mean_p": 0.35,
+   "hit_rate": 1.0
+  },
+  {
+   "bin": "[0.5, 0.7)",
+   "count": 5,
+   "mean_p": 0.5980000000000001,
+   "hit_rate": 0.8
+  },
+  {
+   "bin": "[0.7, 0.85)",
+   "count": 1,
+   "mean_p": 0.71,
+   "hit_rate": 1.0
+  },
+  {
+   "bin": "[0.85, 0.97]",
+   "count": 0,
+   "mean_p": NaN,
+   "hit_rate": NaN
+  }
+ ],
+ "verdict": "FAIL",
+ "rows": [
+  {
+   "id": "A-OTHER-1",
+   "class": "EQUIPMENT_FAULT",
+   "tractors": [
+    "T2"
+   ],
+   "start": "2026-05-04T11:59:00+00:00",
+   "hit": true,
+   "event": "TRN-09",
+   "p_loeo": 0.64,
+   "p_in": 0.74,
+   "p_old": 0.995,
+   "excluded_units": 1,
+   "groups": {
+    "G2": [
+     "present",
+     4.33
+    ],
+    "G5": [
+     "present",
+     3.06
+    ]
+   }
+  },
+  {
+   "id": "A-SPOOFING-1",
+   "class": "SPOOFING",
+   "tractors": [
+    "T2"
+   ],
+   "start": "2026-05-04T13:12:10+00:00",
+   "hit": true,
+   "event": "TRN-06",
+   "p_loeo": 0.38,
+   "p_in": 0.46,
+   "p_old": 0.998,
+   "excluded_units": 1,
+   "groups": {
+    "G3": [
+     "present",
+     2.34
+    ],
+    "G5": [
+     "present",
+     1.23
+    ]
+   }
+  },
+  {
+   "id": "A-JAMMING-1",
+   "class": "JAMMING",
+   "tractors": [
+    "T1",
+    "T2",
+    "T3"
+   ],
+   "start": "2026-05-04T16:30:00+00:00",
+   "hit": true,
+   "event": "TRN-03",
+   "p_loeo": 0.71,
+   "p_in": 0.77,
+   "p_old": 1.0,
+   "excluded_units": 1,
+   "groups": {
+    "G1": [
+     "present",
+     1.84
+    ],
+    "G4": [
+     "present",
+     4.29
+    ]
+   }
+  },
+  {
+   "id": "A-JAMMING-2",
+   "class": "JAMMING",
+   "tractors": [
+    "T1",
+    "T2",
+    "T3"
+   ],
+   "start": "2026-05-04T21:00:00+00:00",
+   "hit": true,
+   "event": "TRN-04",
+   "p_loeo": 0.6,
+   "p_in": 0.77,
+   "p_old": 1.0,
+   "excluded_units": 2,
+   "groups": {
+    "G1": [
+     "present",
+     1.84
+    ],
+    "G4": [
+     "present",
+     3.57
+    ]
+   }
+  },
+  {
+   "id": "A-SPOOFING-2",
+   "class": "SPOOFING",
+   "tractors": [
+    "T3"
+   ],
+   "start": "2026-05-04T20:58:00+00:00",
+   "hit": false,
+   "event": null,
+   "p_loeo": 0.56,
+   "p_in": 0.46,
+   "p_old": 0.997,
+   "excluded_units": 2,
+   "groups": {
+    "G3": [
+     "present",
+     2.48
+    ],
+    "G5": [
+     "present",
+     1.53
+    ]
+   }
+  },
+  {
+   "id": "A-SPOOFING-3",
+   "class": "SPOOFING",
+   "tractors": [
+    "T1"
+   ],
+   "start": "2026-05-05T00:30:06+00:00",
+   "hit": true,
+   "event": "TRN-07",
+   "p_loeo": 0.38,
+   "p_in": 0.46,
+   "p_old": 0.998,
+   "excluded_units": 1,
+   "groups": {
+    "G3": [
+     "present",
+     2.34
+    ],
+    "G5": [
+     "present",
+     1.23
+    ]
+   }
+  },
+  {
+   "id": "A-EQUIPMENT_FAULT-1",
+   "class": "EQUIPMENT_FAULT",
+   "tractors": [
+    "T1"
+   ],
+   "start": "2026-05-05T02:00:01+00:00",
+   "hit": true,
+   "event": "TRN-10",
+   "p_loeo": 0.64,
+   "p_in": 0.74,
+   "p_old": 0.986,
+   "excluded_units": 1,
+   "groups": {
+    "G2": [
+     "present",
+     4.33
+    ],
+    "G5": [
+     "present",
+     3.06
+    ]
+   }
+  },
+  {
+   "id": "A-EQUIPMENT_FAULT-2",
+   "class": "SPACE_WEATHER",
+   "tractors": [
+    "T1",
+    "T2",
+    "T3"
+   ],
+   "start": "2026-05-05T11:00:00+00:00",
+   "hit": true,
+   "event": "TRN-01",
+   "p_loeo": 0.55,
+   "p_in": 0.75,
+   "p_old": 1.0,
+   "excluded_units": 1,
+   "groups": {
+    "G1": [
+     "present",
+     1.41
+    ],
+    "G2": [
+     "present",
+     1.53
+    ],
+    "G4": [
+     "present",
+     4.33
+    ]
+   }
+  },
+  {
+   "id": "A-SPACE_WEATHER-1",
+   "class": "SPACE_WEATHER",
+   "tractors": [
+    "T1",
+    "T2",
+    "T3"
+   ],
+   "start": "2026-05-05T18:55:12+00:00",
+   "hit": true,
+   "event": "TRN-02",
+   "p_loeo": 0.26,
+   "p_in": 0.46,
+   "p_old": 0.999,
+   "excluded_units": 1,
+   "groups": {
+    "G1": [
+     "present",
+     1.41
+    ],
+    "G2": [
+     "absent",
+     0.43
+    ],
+    "G4": [
+     "present",
+     4.33
+    ]
+   }
+  },
+  {
+   "id": "A-SPOOFING-4",
+   "class": "SPOOFING",
+   "tractors": [
+    "T3"
+   ],
+   "start": "2026-05-05T21:31:58+00:00",
+   "hit": true,
+   "event": "TRN-08",
+   "p_loeo": 0.38,
+   "p_in": 0.46,
+   "p_old": 0.998,
+   "excluded_units": 1,
+   "groups": {
+    "G3": [
+     "present",
+     2.34
+    ],
+    "G5": [
+     "present",
+     1.23
+    ]
+   }
+  }
+ ],
+ "table_run": "b2a8fabf00a85c7f"
+}

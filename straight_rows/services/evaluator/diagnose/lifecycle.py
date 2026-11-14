@@ -105,7 +105,7 @@ class Lifecycle:
         return f"A-{cls}-{self.counter[cls]}"
 
     def event(self, a: Alarm, t_data: float, frm: str | None, to: AlarmState | str, reason: Reason | str,
-              bf: float | None = None, note: str | None = None) -> None:
+              bf: float | None = None, note: str | None = None, quiet: bool = False) -> None:
         to_s = to.value if isinstance(to, AlarmState) else str(to)
         rs = reason.value if isinstance(reason, Reason) else str(reason)
         rec = {"kind": "alarm", "t_data": t_data, "t_data_iso": iso(t_data), "alarm_id": a.id, "cls": a.cls,
@@ -117,17 +117,17 @@ class Lifecycle:
         if note:
             rec["note"] = note
         a.history.append({k: v for k, v in rec.items() if k != "kind"})
-        self.sink.emit(rec)
+        self.sink.emit(rec, quiet=quiet)
 
     def create(self, cls: str, t_data: float, start: float, tractors: set[str], state: AlarmState,
                bf: float | None, reason: Reason = Reason.RAISED, end: float | None = None, note: str | None = None,
-               episode: str | None = None, track: str = "signal") -> Alarm:
+               episode: str | None = None, track: str = "signal", quiet: bool = False) -> Alarm:
         a = Alarm(self._new_id(cls), cls, state, start, end, set(tractors), set(tractors) if end is None else set(),
                   unattributed=(cls == "OTHER"), created_t=t_data, last_touch_t=t_data, episode=episode, track=track,
                   raw_start=start, raw_end=end)
         self.alarms[a.id] = a
         self.order.append(a.id)
-        self.event(a, t_data, None, state, reason, bf, note)
+        self.event(a, t_data, None, state, reason, bf, note, quiet=quiet)
         return a
 
     def retract(self, a: Alarm, t_data: float, reason: Reason, note: str | None = None, bf: float | None = None) -> None:
@@ -139,10 +139,13 @@ class Lifecycle:
             a.end = t_data
         self.event(a, t_data, frm, AlarmState.RETRACTED, reason, bf, note)
 
-    def list(self, state: str | None = None, cls: str | None = None, tractor: str | None = None) -> list[Alarm]:
+    def list(self, state: str | None = None, cls: str | None = None, tractor: str | None = None,
+             include_suppressed: bool = False) -> list[Alarm]:
         out = []
         for aid in self.order:
             a = self.alarms[aid]
+            if a.extra.get("suppressed") and not include_suppressed:
+                continue                  # v2.3 P1: known-nuisance alerts are not in the operator alarm list
             if state and a.state.value != state:
                 continue
             if cls and a.cls != cls:

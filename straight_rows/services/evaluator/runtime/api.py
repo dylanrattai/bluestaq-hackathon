@@ -60,8 +60,9 @@ def create_app(eng: Engine) -> FastAPI:
         return eng.snapshot()
 
     @app.get("/alarms")
-    def alarms(state: Optional[str] = None, cls: Optional[str] = None, tractor: Optional[str] = None):
-        return eng.alarms(state, cls, tractor)
+    def alarms(state: Optional[str] = None, cls: Optional[str] = None, tractor: Optional[str] = None,
+               include_suppressed: int = 0):
+        return eng.alarms(state, cls, tractor, bool(include_suppressed))
 
     @app.get("/alarms/{alarm_id}")
     def alarm(alarm_id: str):

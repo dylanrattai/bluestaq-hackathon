@@ -98,7 +98,7 @@ def test_v21_4_confidence_from_signs(cfg):
     p_less, _ = _storm_p(cfg, False)
     assert p_all > 0.95
     assert p_less < p_all
-    assert "F9" in line and "P = " in line
+    assert "F9" in line and "BF/(1+BF) = " in line          # v2.2 relabelled the v2.1 P in the signs line
 
 
 def test_v21_4b_confidence_unit(cfg):

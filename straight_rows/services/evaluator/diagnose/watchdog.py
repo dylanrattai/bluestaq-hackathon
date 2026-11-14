@@ -204,7 +204,7 @@ class Watchdog:
                 q.active.clear()
                 lc.event(q, now, frm, AlarmState.RETRACTED, Reason.MERGED, note=f"merged into {p.id} (gap {(q.start - p.end) / 60:.0f} min)")
                 p.bf = max(p.bf, q.bf)
-                p.confidence = round(p.bf / (1.0 + p.bf), 3)
+                p.extra["bf_conf"] = round(p.bf / (1.0 + p.bf), 3)
                 self.eng.episodes.apply_span(p)
                 lc.event(p, now, p.state.value, p.state, Reason.MERGED, note=f"absorbed {q.id}")
                 run.actions.append(f"{q.id} merged into {p.id}")
@@ -249,8 +249,8 @@ class Watchdog:
         cands = []
         for aid in lc.order:
             a = lc.alarms[aid]
-            if a.state in (AlarmState.RETRACTED, AlarmState.WATCH):
-                continue
+            if a.state in (AlarmState.RETRACTED, AlarmState.WATCH) or a.track == "site":
+                continue                      # site multipath: a suppressed nuisance alert, final at creation
             if final or a.open or (a.end is not None and now - a.end <= self.lookback):
                 cands.append(a)
         for a in cands:
@@ -283,6 +283,14 @@ class Watchdog:
                 a.confirmed_at = now
                 lc.event(a, now, "ALARM", AlarmState.CONFIRMED, Reason.CONFIRMED, a.bf)
                 run.actions.append(f"{a.id} confirmed")
+        # v2.2: report the current P (from the findings seen so far) on every live or just-handled alarm
+        for a in lc.alarms.values():
+            if a.state != AlarmState.RETRACTED and a.track != "site" and (a.open or a.id in run.touched or final):
+                self.eng.set_confidence(a, now)
+        n_site = len(self.eng.site.reported) - getattr(self, "_site_seen", 0)
+        self._site_seen = len(self.eng.site.reported)
+        if n_site:
+            run.actions.append(f"site-multipath dips: {n_site} (suppressed)")
         self.runs.append(run)
         if len(self.runs) > 200:
             del self.runs[:-200]

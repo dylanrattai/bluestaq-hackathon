@@ -48,9 +48,9 @@ def build_detections(alarms: list[Alarm], cfg: dict[str, Any], now: float) -> li
             log.warning("dropping %s: no tractors", a.id)
             continue
         conf = min(max(float(a.confidence), 0.0), 1.0)
-        ev = [str(s) for s in a.evidence if str(s).strip()][:5]
+        ev = [str(s) for s in a.evidence if str(s).strip()][:6]      # 5 + the v2.2 confidence line
         if len(ev) < 2:
-            ev = (ev + [f"{a.cls} alarm {a.id} on {','.join(sorted(a.tractors))} {iso(start)}..{iso(end)}"])[:5]
+            ev = (ev + [f"{a.cls} alarm {a.id} on {','.join(sorted(a.tractors))} {iso(start)}..{iso(end)}"])[:6]
         dets.append({
             "start": iso(start), "end": iso(end), "tractors": sorted(set(a.tractors)), "class": a.cls,
             "action": ACTIONS[a.cls], "confidence": round(conf, 3), "evidence": ev,
@@ -83,7 +83,7 @@ def check_submission(sub: dict, cfg: dict[str, Any]) -> list[str]:
             problems.append(f"detections[{i}] class/action mismatch")
         if not (0.0 <= d["confidence"] <= 1.0):
             problems.append(f"detections[{i}] confidence out of range")
-        if not (2 <= len(d["evidence"]) <= 5):
+        if not (2 <= len(d["evidence"]) <= 6):       # 5 + the v2.2 confidence line
             problems.append(f"detections[{i}] needs 2-5 evidence strings")
         if not d["tractors"] or len(set(d["tractors"])) != len(d["tractors"]):
             problems.append(f"detections[{i}] tractors must be non-empty and distinct")

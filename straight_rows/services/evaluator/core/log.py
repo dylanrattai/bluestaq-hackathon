@@ -76,12 +76,14 @@ class EventSink:
             if q in self.subscribers:
                 self.subscribers.remove(q)
 
-    def emit(self, rec: dict, console: bool = True) -> None:
+    def emit(self, rec: dict, console: bool = True, quiet: bool = False) -> None:
         rec = dict(rec)
         rec.setdefault("t_wall", datetime.now(tz=timezone.utc).isoformat(timespec="seconds"))
         if self._fh:
             self._fh.write(json.dumps(rec, default=str) + "\n")
             self._fh.flush()
+        if quiet:
+            return                    # v2.3 P1: suppressed nuisance alerts go to the JSONL log only
         with self.lock:
             self.feed.append(rec)
             if len(self.feed) > self.max_feed:

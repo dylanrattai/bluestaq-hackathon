@@ -155,6 +155,24 @@ watchdog:                             # §7.7
   min_step_sigma: 4.0                 # a re-localised change must be >= 4 sigma of the 1 Hz residual (same bar as F5)
   parked_frac_retract: 1.0            # entirely parked -> PARKED
 
+site_multipath:                       # ACCURACY_UPDATE v2.3 P1: recurring site multipath = suppressed MULTIPATH reports
+  enabled: true
+  sites: multipath_sites.yaml         # learned on dev by tools/fit_sites.py (frozen)
+  ref_window_s: 360                   # ref = median min C/N0 over [t-360 s, t-60 s]
+  ref_lag_s: 60
+  smooth_samples: 3                   # deficit = 3-sample trailing mean of ref - min C/N0
+  deficit_db: 5.0
+  min_s: 5
+  max_s: 60
+  speed_mps: 1.0                      # working samples only
+  cell_deg: 0.0002                    # site grid
+  min_passes: 20
+  min_rate: 0.5
+  max_detections: 500                 # total exported detections in the evaluation window
+
+confidence:                           # CONFIDENCE_UPDATE v2.2: reporting only, never gates a detection
+  table: confidence_table.yaml        # frozen by tools/fit_confidence.py from the v2.1-physics dev run; missing -> BF/(1+BF)
+
 api:
   watchdog_history: 20
   ui_poll_ms: 2000

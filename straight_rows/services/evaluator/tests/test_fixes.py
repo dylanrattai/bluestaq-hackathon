@@ -179,11 +179,13 @@ def test_fix6_dips_inside_jamming_are_explained(cfg):
 
 # ---------------------------------------------------------------- Fix 7
 def test_fix7_confidence_is_bf_posterior(cfg):
-    """Update v2 §3: confidence = BF/(1+BF) of the episode-level classification, rounded to 3 decimals."""
+    """v2.2: the reported confidence is the group-witness P (in [0.02, 0.97], 2 decimals); the v2.1 value
+    BF/(1+BF) of the episode-level classification is kept as extra["bf_conf"]."""
     tele = make_tele(2 * 3600)
     ramp_xte(tele, "T3", T0 + 40 * MIN, T0 + 70 * MIN, 0.005)
     eng = run_engine(cfg, tele, make_sda(cfg))
     sp = confirmed(eng, "SPOOFING")
     assert len(sp) == 1
-    assert sp[0].confidence == round(sp[0].bf / (1 + sp[0].bf), 3)
-    assert sp[0].confidence > 0.9
+    assert sp[0].extra["bf_conf"] == round(sp[0].bf / (1 + sp[0].bf), 3) and sp[0].extra["bf_conf"] > 0.9
+    assert 0.02 <= sp[0].confidence <= 0.97 and sp[0].confidence == round(sp[0].confidence, 2)
+    assert sp[0].evidence[-1].startswith("P=")

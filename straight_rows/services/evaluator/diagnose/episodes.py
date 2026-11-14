@@ -268,7 +268,7 @@ class EpisodeManager:
             inner += "; " + ", ".join(miss) + " missing"
         if na:
             inner += "; " + ", ".join(na) + " no information"
-        return f"signs seen {len(seen)} of {n} ({inner}), P = {bf / (1.0 + bf):.3f}"
+        return f"signs seen {len(seen)} of {n} ({inner}), BF/(1+BF) = {bf / (1.0 + bf):.3f}"
 
     @staticmethod
     def _map_class(r) -> str:
@@ -588,6 +588,48 @@ class EpisodeManager:
             fd[fid] = {"present": False, "sev": 0.0, "missing": True}
         return fd
 
+    # ---- v2.2: episode-level findings over a detection's own interval and tractors (confidence only)
+    def _pre_sats(self, tr: str, s: float) -> float:
+        f = self.eng.feats[tr]
+        b = int((s - self.t00) // self.batch_s)
+        seg = f.sats_med[max(0, b - 120):max(b, 1)]
+        seg = seg[~np.isnan(seg)]
+        return float(np.median(seg)) if len(seg) else float("nan")
+
+    def span_findings(self, cls: str, s: float, e: float, trs: list[str], sub: bool = False) -> dict[str, dict[str, dict]]:
+        """Per tractor, every finding judged over [s, e) with the episode rule (phi >= phi_present), using only data
+        up to self.now. F12 is the one of the class's own track (position for SPOOFING, dip for MULTIPATH, signal
+        otherwise); F8 is its phi; F5 = a dip candidate that reached the network; F11 = the stacked step (present
+        for a sub-episode, else its phi among batches with C/N0)."""
+        e = max(min(e, self.now), s + self.batch_s)
+        spans = {tr: (s, e) for tr in trs}
+        f1s, f3, f4 = self._shared_f3_f4(spans, (s, e), sub)
+        b0, b1 = self._brange(s, e)
+        out = {}
+        for tr in trs:
+            f12 = self._f12(tr, s, e, "F11" if sub else "F1", set(), sub)
+            fd = self._tractor_findings(tr, s, e, self.now, f1s[tr], f3, f4, f12, self._pre_sats(tr, s))
+            phi8, sev8 = self._phi(tr, "F8", b0, b1)
+            fd["F8"] = {"present": bool(phi8 is not None and phi8 >= self.phi_min), "sev": sev8, "missing": phi8 is None}
+            if cls == "SPOOFING":
+                p12 = self.pos12[tr][b0:b1]
+                k = p12[p12 >= 0]
+                fd["F12"] = ({"present": bool((k == 1).mean() >= self.phi_min), "sev": 1.0, "missing": False} if len(k)
+                             else {"present": False, "sev": 0.0, "missing": True})
+            elif cls == "MULTIPATH":
+                fd["F12"] = self._dip_f12(tr, s, e)
+            rows = [r for r in self.dips if r["tractor"] == tr and r["start"] <= e + 30 and r["end"] >= s - 30]
+            live = [r for r in rows if not r["excluded"] or str(r["excluded"]).startswith(("MULTIPATH BF", "signal", "spoof", "alarm"))]
+            fd["F5"] = {"present": bool(live), "sev": 0.5, "missing": False}
+            if sub:
+                fd["F11"] = {"present": True, "sev": 0.5, "missing": False}
+            else:
+                phi11, _ = self._phi(tr, "F11", b0, b1, denom_fid="F1")
+                fd["F11"] = ({"present": False, "sev": 0.0, "missing": True} if phi11 is None
+                             else {"present": bool(phi11 >= self.phi_min), "sev": 0.5, "missing": False})
+            out[tr] = fd
+        return out
+
     # ---- classification (§3, §4; v2.1 §4, §5)
     def _classify(self, members: list[str], spans: dict[str, tuple[float, float]], farm_span: tuple[float, float],
                   now: float, sub: bool, sats_ref: dict[str, float], exclude_f12: set[str]) -> dict:
@@ -828,7 +870,9 @@ class EpisodeManager:
                                      note=f"{row['end'] - row['start']:.0f} s dip of {f5.detail.get('depth_db', 0):.1f} dB "
                                           f"({f5.detail.get('channel')})", episode=self._id("D"), track="dip")
             a.bf = bf
-            a.confidence = round(bf / (1.0 + bf), 3)
+            a.extra["bf_conf"] = round(bf / (1.0 + bf), 3)
+            if "conf" not in a.extra:
+                a.confidence = self.eng.initial_confidence("MULTIPATH", bf)
             a.extra["signs"] = self.signs("MULTIPATH", [{"F5": {"present": True, "missing": False}, "F12": f12}], bf, fu=eng.fusion)
             a.extra["dip"] = {"start": row["start"], "end": row["end"], "depth_db": f5.detail.get("depth_db"),
                               "channel": f5.detail.get("channel")}
@@ -865,7 +909,9 @@ class EpisodeManager:
                 continue
             row["bf"], row["f12"] = bf, (None if f12["missing"] else f12["present"])
             a.bf = bf
-            a.confidence = round(bf / (1.0 + bf), 3)
+            a.extra["bf_conf"] = round(bf / (1.0 + bf), 3)
+            if "conf" not in a.extra:
+                a.confidence = self.eng.initial_confidence("MULTIPATH", bf)
             a.extra["f12"] = f12
             a.extra["signs"] = self.signs("MULTIPATH", [dfd], bf, fu=self.eng.fusion)
             a.extra["checked"] = True
@@ -906,7 +952,9 @@ class EpisodeManager:
         a.tractors = set(g["tractors"])
         a.active = set(a.tractors) if not closed else set()
         a.bf = float(g["bf"])
-        a.confidence = round(a.bf / (1.0 + a.bf), 3)    # v2.1 §5: the episode posterior under even prior odds
+        a.extra["bf_conf"] = round(a.bf / (1.0 + a.bf), 3)   # v2.1 §5 (kept for comparison; v2.2 reports P)
+        if "conf" not in a.extra:
+            a.confidence = self.eng.initial_confidence(a.cls, a.bf)
         if g.get("signs"):
             a.extra["signs"] = g["signs"]
         a.records = records

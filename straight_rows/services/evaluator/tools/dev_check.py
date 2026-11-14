@@ -50,7 +50,10 @@ def onset_credit(err_s: float) -> float:
     return 1.0 - (err_s - 300) / 3300
 
 
-def score(dets: list[dict], truth: list[dict]) -> dict:
+def score(dets: list[dict], truth: list[dict], strict: bool = True) -> dict:
+    """PDF p. 4: recurrent MULTIPATH reports lasting <= 3 min are exempt from extra-detection penalties except
+    duplicates overlapping the scored representative window. strict: a duplicate = any unmatched short MULTIPATH
+    report overlapping a labelled MULTIPATH window; lenient (strict=False): only on a tractor of that label."""
     pairs = []
     for i, d in enumerate(dets):
         for j, t in enumerate(truth):
@@ -74,8 +77,12 @@ def score(dets: list[dict], truth: list[dict]) -> dict:
         n_t = sum(1 for t in truth if t["class"] == c)
         extras = [i for i, d in enumerate(dets) if d["class"] == c and i not in used_d]
         if c == "MULTIPATH":
-            matched_times = [dets[i]["s"] for i, j in matches if dets[i]["class"] == c]
-            extras = [i for i in extras if not any(abs(dets[i]["s"] - mt) <= 180 for mt in matched_times)]
+            reps = [t for t in truth if t["class"] == c]
+
+            def duplicate(d):
+                return any(d["s"] < t["e"] and d["e"] > t["s"] and (strict or set(d["tractors"]) & set(t["tractors"]))
+                           for t in reps)
+            extras = [i for i in extras if (dets[i]["e"] - dets[i]["s"]) > 180 or duplicate(dets[i])]
         fp, fn = len(extras), n_t - tp
         prec = tp / (tp + fp) if tp + fp else (1.0 if n_t == 0 else 0.0)
         rec = tp / n_t if n_t else 1.0
@@ -189,6 +196,8 @@ def run_dev_check(eng, cfg: dict, data_dir: Path, out_dir: Path) -> dict:
              f"Development period {iso(dev0)} .. {iso(dev1)}: {n_t} labelled episodes, {len(dets)} confirmed detections.", "",
              "## Accuracy rating", "",
              f"- **Diagnostic score {res['score']:.1f} / 40** (25 x macro-F1 + 15 x mean onset credit)",
+             f"- Lenient reading of the multipath duplicate rule (only same-tractor duplicates count): "
+             f"{score(dets, truth, strict=False)['score']:.1f} / 40",
              f"- Macro-F1 {res['macro_f1']:.3f}; episodes found {tp}/{n_t} (recall {tp / n_t:.0%}); "
              f"extra detections {fp} (precision {tp / (tp + fp) if tp + fp else 0:.0%}); mean onset credit {res['mean_onset_credit']:.2f}",
              "", "| version | score /40 | macro-F1 | found | extras | onset credit |", "|---|---|---|---|---|---|"]

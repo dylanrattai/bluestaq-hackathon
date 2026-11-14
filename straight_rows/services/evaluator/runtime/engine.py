@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from detect.baseline import siegmund_arl0, solve_h
+from diagnose.confidence import confidence as conf_p, evidence_line, group_states, load_table
 from diagnose.evidence import build_evidence
 from runtime.export import build_submission, resolve_validator, write_submission
 from diagnose.fusion import Fusion
@@ -17,6 +18,7 @@ from ingest.grid import Gate, compute_features
 from detect.inputs import cn0, cross_track, fix, link, s4
 from detect.inputs.ctx import Ctx
 from diagnose.episodes import EpisodeManager
+from detect.site_multipath import SiteMultipath
 from diagnose.lifecycle import Lifecycle
 from ingest.load import SdaFeeds, Telemetry, load_sda, load_telemetry
 from core.log import EventSink, iso
@@ -63,7 +65,8 @@ class Engine:
         self.t0s = f0.t0
         self.ladders = Ladders(cfg)
         self.fusion = Fusion(cfg)
-        self.fusion_ep = Fusion(cfg, episode=True)     # v2.1 §9.1: episode-level leaks (same as per-batch in the physics config)
+        self.fusion_ep = Fusion(cfg, episode=True)
+        self.conf_table = load_table(cfg, HERE)       # v2.2: frozen confidence table (None -> BF/(1+BF) as before)     # v2.1 §9.1: episode-level leaks (same as per-batch in the physics config)
         self.gate = Gate(cfg, self.tractors)
         self.lifecycle = Lifecycle(cfg, self.tractors, self.sink)
         self.watchdog = Watchdog(self)
@@ -79,6 +82,7 @@ class Engine:
         self.working_hist = {tr: np.zeros(self.nb, dtype=bool) for tr in self.tractors}
         self.post_hist = {tr: np.zeros((self.nb, len(self.fusion.causes)), dtype=np.float32) for tr in self.tractors}
         self.episodes = EpisodeManager(self)
+        self.site = SiteMultipath(self)             # v2.3 P1: recurring site multipath (suppressed alerts)
         self.b_done = 0
         self.now = float(self.t0s[0])
         self.last_results: dict[str, Any] = {}
@@ -133,6 +137,7 @@ class Engine:
             self.post_hist[tr][b] = [r.posterior[c] for c in self.fusion.causes]
         # episodes first, causes second
         self.episodes.step(b, t0, now, findings)
+        self.site.step(now)
         ctx.prev_present = {k: v.present for k, v in ctx.out.items()}
         self.last_results = results
         self.last_findings = findings
@@ -165,15 +170,52 @@ class Engine:
     def finish(self) -> None:
         t_end = float(self.t0s[self.b_done - 1]) + self.batch_s if self.b_done else self.now
         self.episodes.finish(t_end)
+        self.site.step(t_end + 1.0)
         self.watchdog.run(t_end, final=True)
         self.build_all_evidence(t_end)
         n_conf = sum(1 for a in self.lifecycle.alarms.values() if a.state == AlarmState.CONFIRMED)
         log.info("final: %d alarms, %d confirmed, %.1f s wall", len(self.lifecycle.alarms), n_conf, time.time() - self.started)
+        self.apply_cap(t_end)
         if self.write_outputs and self.out_dir:
             self.episodes.write_dips(self.out_dir)
             sub = build_submission(list(self.lifecycle.alarms.values()), self.cfg, t_end)
             self.submission_path = write_submission(sub, self.out_dir, self.cfg, self.validator,
                                                     allow_empty=bool(self.cfg.get("_allow_empty")))
+
+    # ------------------------------------------------------------------ v2.2 confidence (reporting only)
+    def initial_confidence(self, cls: str, bf: float) -> float:
+        if self.conf_table is None or cls not in self.conf_table["classes"]:
+            return round(bf / (1.0 + bf), 3)
+        return round(min(max(float(self.conf_table["classes"][cls]["prior"]), 0.02), 0.97), 2)
+
+    def set_confidence(self, a, now: float) -> None:
+        """P from the sign groups seen so far over the alarm's own interval and tractors (causal: data <= now)."""
+        if self.conf_table is None or a.cls not in self.conf_table["classes"] or not a.tractors:
+            return
+        fds = self.episodes.span_findings(a.cls, a.start, a.span_end(now), sorted(a.tractors), sub=(a.track == "sub"))
+        st = group_states(a.cls, list(fds.values()))
+        p, br = conf_p(a.cls, st, self.conf_table)
+        a.confidence = p
+        a.extra["conf"] = {"p": p, "br": br, "line": evidence_line(p, br), "t": now}
+
+    def apply_cap(self, now: float) -> None:
+        """v2.3 P1: at most `site_multipath.max_detections` exported detections in the evaluation window. Over the cap,
+        site-multipath reports go first inside an exported JAMMING on the same tractor, then the shallowest."""
+        from core.srtypes import ACTIONS, Reason
+        cap = int((self.cfg.get("site_multipath") or {}).get("max_detections", 500))
+        w0, w1 = float(self.cfg["window"]["start_s"]), float(self.cfg["window"]["end_s"])
+        live = [a for a in self.lifecycle.alarms.values() if a.state == AlarmState.CONFIRMED and a.cls in ACTIONS
+                and not a.unattributed and a.start < w1 and a.span_end(now) > w0]
+        over = len(live) - cap
+        if over <= 0:
+            return
+        jams = [a for a in live if a.cls == "JAMMING"]
+        site = [a for a in live if a.track == "site"]
+        in_jam = lambda a: any(a.tractors & j.tractors and j.start <= a.start <= j.span_end(now) for j in jams)
+        site.sort(key=lambda a: (not in_jam(a), a.extra["site"]["depth_db"], a.start))
+        for a in site[:over]:
+            self.lifecycle.retract(a, now, Reason.NOT_SUSTAINED, note=f"over the {cap}-detection cap")
+        log.warning("detection cap: %d site-multipath reports dropped to stay at %d", min(over, len(site)), cap)
 
     def build_all_evidence(self, now: float) -> None:
         for a in self.lifecycle.alarms.values():
@@ -207,9 +249,9 @@ class Engine:
                     "open_episodes": self.episodes.snapshot(),
                     "n_alarms": len(self.lifecycle.alarms)}
 
-    def alarms(self, state=None, cls=None, tractor=None) -> list[dict]:
+    def alarms(self, state=None, cls=None, tractor=None, include_suppressed=False) -> list[dict]:
         with self.lock:
-            return [a.summary(self.now) for a in self.lifecycle.list(state, cls, tractor)]
+            return [a.summary(self.now) for a in self.lifecycle.list(state, cls, tractor, include_suppressed)]
 
     def alarm(self, aid: str) -> dict | None:
         with self.lock:

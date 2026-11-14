@@ -68,7 +68,7 @@ def test_evidence_strings(eng):
     sub = json.loads((eng.out / "submission.json").read_text())
     for d in sub["detections"]:
         ev = d["evidence"]
-        assert 2 <= len(ev) <= 5
+        assert 2 <= len(ev) <= 6          # 5 + the v2.2 confidence line
         joined = " ".join(ev)
         assert re.search(r"\d\d:\d\d", joined), ev
         assert re.search(r"\bT[123]\b", joined), ev
