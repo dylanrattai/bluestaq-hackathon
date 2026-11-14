@@ -14,7 +14,7 @@ def findings(ctx: Ctx) -> list[Finding]:
     fc = ctx.cfg["findings"]
     park_speed = float(ctx.cfg["gate"]["park_speed_mps"])
     fix_frac = float(fc["fix_frac"])
-    float_band = float(fc.get("f8_float_band_m", 0.3))
+    float_band = float(ctx.cfg["position"]["float_band_m"])     # Update v2 §5: the float tier's nominal accuracy
     for tr in ctx.tractors:
         f = ctx.feats[tr]
         b, t0 = ctx.b, ctx.t0

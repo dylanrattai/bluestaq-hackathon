@@ -34,11 +34,18 @@ def _f1_f2_f11(ctx: Ctx, tr: str) -> tuple[Finding, Finding, Finding]:
     s1 = ch1.update(t0, x)
     # Fix 3: F2 is measured against the in-event variance: re-reference the log-variance channel whenever the
     # level event opens or closes, seeding sigma with the pre-event value
+    # Update v2 §2: while a farm episode holds the references frozen, F2 is judged against the frozen pre-episode
+    # variance (the episode-level network separates storm variance from jamming), so no restart happens then
     warm = int(ctx.cfg["cusum"].get("in_event_warmup_batches", 2))
     if st.get("f2_restart_pending"):
-        ch2.restart(seed_sigma=st.get("f2_seed_sigma"), min_batches=warm)
+        if not ch2.frozen:
+            ch2.restart(seed_sigma=st.get("f2_seed_sigma"), min_batches=warm)
         st["f2_restart_pending"] = False
-    if s1.present != st["f1_prev"]:
+    turn = bool(f.turn_batch[b])
+    if turn:
+        # v2.1 §1: a headland turn carries no F2 information and stays out of the log-variance reference
+        s2 = ch2.skip(t0)
+    elif s1.present != st["f1_prev"] and not ch2.frozen:
         # the transition batch holds the step edge: skip it, then re-reference from the next batch on
         st["f2_restart_pending"] = True
         st["f2_seed_sigma"] = ch2.sigma_eff
@@ -82,7 +89,9 @@ def _f1_f2_f11(ctx: Ctx, tr: str) -> tuple[Finding, Finding, Finding]:
             # F11 is defined only relative to an open event: present or no information, never "absent"
             ctx.tracker.reset((tr, "F11"))
             f11 = Finding("F11", tr, t0, False, 0.0, None, {"missing": True, "why": "no stacked step", "event_open": s1.present})
-    if s2.fallback or s2.missing:
+    if turn:
+        f2 = missing_finding("F2", tr, t0, "headland turn")
+    elif s2.fallback or s2.missing:
         f2 = missing_finding("F2", tr, t0, "no log-variance reference")
     else:
         f2 = Finding("F2", tr, t0, s2.present, 0.5 if s2.present else 0.0, s2.onset if s2.present else None,
@@ -149,6 +158,16 @@ def _f5(ctx: Ctx, tr: str, f1: Finding) -> Finding:
             dur = z - a
             if dur > max_len or depth < dip["thr"]:
                 continue
+            if not need_sats:
+                # Update v2 §6: a min-C/N0 path within +-5 s of a satellite count change is the set changing, not a fade
+                pad = int(ctx.cfg["dips"]["set_change_s"])
+                hi_i = min(z + pad, sl.stop)                    # causal: never past the batch end
+                win = series.sats[max(a - pad, 0):hi_i]
+                win = win[~np.isnan(win)]
+                if len(win) and np.any(win != win[0]):
+                    st.setdefault("excluded", []).append({"dip_start": float(t[a]), "dip_end": float(t[z - 1]) + 1.0,
+                                                          "depth_db": depth, "channel": name, "why": "sat_set_change"})
+                    continue
             if need_sats:
                 sats_seg = series.sats[a:z]
                 sats_loc = series.sats[max(a - 150, 0):max(a - 30, 1)]
@@ -162,6 +181,11 @@ def _f5(ctx: Ctx, tr: str, f1: Finding) -> Finding:
             break
     if not any_ref:
         return missing_finding("F5", tr, t0, "no local reference")
+    if f.turn_batch[b]:
+        # v2.1 §1: a dip ending in a turn batch is the headland turn; no F5 information
+        if found is not None:
+            st.setdefault("excluded", []).append({**found, "why": "headland_turn"})
+        return missing_finding("F5", tr, t0, "headland turn")
     if found is None:
         return Finding("F5", tr, t0, False, 0.0, None, {})
     level = ctx.ladders["dcn0_db"].level(found["depth_db"]) or 0

@@ -1,4 +1,4 @@
-"""Replay loop: grid -> findings -> fusion -> lifecycle -> watchdog (spec §5)."""
+"""Replay loop: grid -> findings -> episodes (signal / position / short-dip) -> watchdog (spec §5, Update v2)."""
 from __future__ import annotations
 
 import logging
@@ -14,8 +14,9 @@ from diagnose.evidence import build_evidence
 from runtime.export import build_submission, resolve_validator, write_submission
 from diagnose.fusion import Fusion
 from ingest.grid import Gate, compute_features
-from detect.inputs import cn0, cross_track, fix, fleet, link, s4
+from detect.inputs import cn0, cross_track, fix, link, s4
 from detect.inputs.ctx import Ctx
+from diagnose.episodes import EpisodeManager
 from diagnose.lifecycle import Lifecycle
 from ingest.load import SdaFeeds, Telemetry, load_sda, load_telemetry
 from core.log import EventSink, iso
@@ -62,9 +63,11 @@ class Engine:
         self.t0s = f0.t0
         self.ladders = Ladders(cfg)
         self.fusion = Fusion(cfg)
+        self.fusion_ep = Fusion(cfg, episode=True)     # v2.1 §9.1: episode-level leaks (same as per-batch in the physics config)
         self.gate = Gate(cfg, self.tractors)
         self.lifecycle = Lifecycle(cfg, self.tractors, self.sink)
         self.watchdog = Watchdog(self)
+        self.no_network = [FINDING_IDS.index(f) for f in ("F11", "F12")]   # v2 §8: F11 is the §4 split; per-batch F12 is gone
         self.ctx = Ctx(cfg, self.ladders, self.h, self.tele, self.tractors, self.feats, self.sda)
         lat = np.nanmean(np.concatenate([self.tele.series[t].lat for t in self.tractors]))
         lon = np.nanmean(np.concatenate([self.tele.series[t].lon for t in self.tractors]))
@@ -75,6 +78,7 @@ class Engine:
         self.fv_missing = {tr: np.ones((self.nb, nf), dtype=bool) for tr in self.tractors}
         self.working_hist = {tr: np.zeros(self.nb, dtype=bool) for tr in self.tractors}
         self.post_hist = {tr: np.zeros((self.nb, len(self.fusion.causes)), dtype=np.float32) for tr in self.tractors}
+        self.episodes = EpisodeManager(self)
         self.b_done = 0
         self.now = float(self.t0s[0])
         self.last_results: dict[str, Any] = {}
@@ -114,20 +118,21 @@ class Engine:
         fix.findings(ctx)
         cross_track.findings(ctx)
         s4.findings(ctx)
-        fleet.findings(ctx)
         findings = {tr: {fid: ctx.out[(fid, tr)] for fid in FINDING_IDS if (fid, tr) in ctx.out} for tr in self.tractors}
-        # fusion
+        # per-batch network: the live view only (detections come from episodes)
         results = {}
         for tr in self.tractors:
             pres, sevs, miss = self.fusion.vector(findings[tr])
             self.fv_present[tr][b] = pres
             self.fv_sev[tr][b] = sevs
             self.fv_missing[tr][b] = miss
+            for j in self.no_network:
+                miss[j] = True
             r = self.fusion.evaluate(tr, t0, pres, sevs, miss)
             results[tr] = r
             self.post_hist[tr][b] = [r.posterior[c] for c in self.fusion.causes]
-        # lifecycle
-        self.lifecycle.step(b, t0, now, results, findings, ctx.working)
+        # episodes first, causes second
+        self.episodes.step(b, t0, now, findings)
         ctx.prev_present = {k: v.present for k, v in ctx.out.items()}
         self.last_results = results
         self.last_findings = findings
@@ -159,12 +164,13 @@ class Engine:
 
     def finish(self) -> None:
         t_end = float(self.t0s[self.b_done - 1]) + self.batch_s if self.b_done else self.now
-        self.lifecycle.close_all(t_end)
+        self.episodes.finish(t_end)
         self.watchdog.run(t_end, final=True)
         self.build_all_evidence(t_end)
         n_conf = sum(1 for a in self.lifecycle.alarms.values() if a.state == AlarmState.CONFIRMED)
         log.info("final: %d alarms, %d confirmed, %.1f s wall", len(self.lifecycle.alarms), n_conf, time.time() - self.started)
         if self.write_outputs and self.out_dir:
+            self.episodes.write_dips(self.out_dir)
             sub = build_submission(list(self.lifecycle.alarms.values()), self.cfg, t_end)
             self.submission_path = write_submission(sub, self.out_dir, self.cfg, self.validator,
                                                     allow_empty=bool(self.cfg.get("_allow_empty")))
@@ -198,6 +204,7 @@ class Engine:
                     "speed": "max" if self.speed is None else self.speed, "batches_done": self.b_done, "batches": self.nb,
                     "done": self.done, "error": self.error, "last_watchdog": wd, "tractors": per,
                     "open_alarms": [a.summary(self.now) for a in self.lifecycle.alarms.values() if a.open],
+                    "open_episodes": self.episodes.snapshot(),
                     "n_alarms": len(self.lifecycle.alarms)}
 
     def alarms(self, state=None, cls=None, tractor=None) -> list[dict]:

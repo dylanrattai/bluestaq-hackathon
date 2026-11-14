@@ -40,6 +40,8 @@ class Reason(str, Enum):
     JOINED = "JOINED"            # another tractor joined
     RELOCALISED = "RELOCALISED"  # watchdog moved a boundary
     FINAL = "FINAL"              # final-pass bookkeeping
+    WEAKENED = "WEAKENED"        # v2: an open episode's provisional class fell below BF 20 (ALARM -> WATCH)
+    UNATTRIBUTED = "UNATTRIBUTED"  # v2: the episode closed with no class at BF >= 20 (or OTHER): logged, never exported
 
 
 # Fixed class -> action table (never computed).

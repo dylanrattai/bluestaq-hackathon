@@ -39,6 +39,12 @@ def findings(ctx: Ctx) -> list[Finding]:
             continue
         fx = fix_component(ctx, tr)
         sc = sat_component(ctx, tr, f1.present)
+        if (not fx["available"] or not fx["degraded"]) and sc.get("turn"):
+            # v2.1 §1: the satellite half has no information at a headland turn; only a degraded fix still speaks
+            ctx.tracker.reset((tr, "F6"))
+            st[tr] = None
+            out.append(ctx.put(missing_finding("F6", tr, t0, "headland turn")))
+            continue
         if not fx["available"] and not sc["available"]:
             ctx.tracker.reset((tr, "F6"))
             st[tr] = None
@@ -49,6 +55,15 @@ def findings(ctx: Ctx) -> list[Finding]:
             cn0_normal = (ctx.ladders["cn0_abs_dbhz"].level(f1.detail.get("cn0")) or 0) == 0
         else:
             cn0_normal = (not math.isnan(z)) and abs(z) < zmax
+        if f1.present or not cn0_normal:
+            # v2.1: F6 is defined only while C/N0 is normal (chain rule); with C/N0 down it says nothing, it is not
+            # "absent" (as absent it counted against SPACE_WEATHER once per tractor in the farm-level sum, §4)
+            ctx.tracker.reset((tr, "F6"))
+            st[tr] = None
+            out.append(ctx.put(Finding("F6", tr, t0, False, 0.0, None,
+                                       {"missing": True, "why": "C/N0 not normal (chain rule)", "fix": fx, "sats": sc,
+                                        "z_cn0": z, "chain_f1": bool(f1.present)})))
+            continue
         present = bool((fx["degraded"] or sc["low"]) and not f1.present and cn0_normal)
         if present:
             lvl = max(fx["level"] if fx["degraded"] else 0, sc["level"] if sc["low"] else 0)

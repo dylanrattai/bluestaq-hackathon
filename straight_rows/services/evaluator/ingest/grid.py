@@ -66,6 +66,20 @@ def heading_change_mask(lat: np.ndarray, lon: np.ndarray, thresh_deg: float) -> 
     return out
 
 
+def turn_batches(turn: np.ndarray, sample_batch: np.ndarray, nb: int, after_s: int) -> np.ndarray:
+    """v2.1 §1: batches containing a headland turn, or whose first `after_s` seconds follow one (the satellite /
+    min-C/N0 disturbance lasts ~10 s past the turn in the dev background). Causal: a batch is marked only from
+    samples at or before its own end. Assumes the 1 Hz axis."""
+    n = len(turn)
+    m = turn.copy()
+    if after_s > 0 and n:
+        idx = np.nonzero(turn)[0]
+        for k in range(1, after_s + 1):
+            j = idx + k
+            m[j[j < n]] = True
+    return np.bincount(sample_batch[m], minlength=nb)[:nb] > 0 if m.any() else np.zeros(nb, dtype=bool)
+
+
 # --------------------------------------------------------------------------- batch features
 @dataclass
 class Features:
@@ -115,6 +129,7 @@ class Features:
     slow_run: np.ndarray
     fast_run: np.ndarray
     turn_mask: np.ndarray
+    turn_batch: np.ndarray             # v2.1 §1: a headland turn in the batch or within turn_after_s before it (causal)
     sample_batch: np.ndarray       # local batch index per sample
 
     def samples_of_batch(self, b: int) -> slice:
@@ -266,6 +281,7 @@ def compute_features(tele: Telemetry, tractor: str, cfg: dict[str, Any]) -> Feat
         lat_mean=lat_mean, lon_mean=lon_mean,
         cn0_ma=cn0_ma, cn0_loc_med=cn0_loc_med, cn0_loc_std=cn0_loc_std, cn0min_ma=cn0min_ma,
         cn0min_loc_med=cn0min_loc_med, cn0min_loc_std=cn0min_loc_std, link_down_run=link_down_run, slow_run=slow_run, fast_run=fast_run, turn_mask=turn,
+        turn_batch=turn_batches(turn, sample_batch, nb, int(fcfg.get("turn_after_s", 12))),
         sample_batch=sample_batch,
     )
 

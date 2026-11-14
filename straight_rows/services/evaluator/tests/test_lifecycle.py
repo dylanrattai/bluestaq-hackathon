@@ -59,20 +59,22 @@ def test_ramp_onset_hinge(cfg):
     assert abs(sp[0].start - t_on) <= 60
 
 
-def test_hindsight_reclassification(cfg):
-    """A mislabelled alarm over a span whose findings say SPACE_WEATHER is reclassified by the watchdog."""
+def test_late_rfi_reclassifies_closed_episode(cfg):
+    """Update v2 §7.3: a one-tractor drop with oscillation closes unattributed (OTHER); an RFI report published
+    after the episode closed makes the watchdog reclassify it as JAMMING."""
     tele = make_tele(2 * 3600)
-    for tr in tele.tractors:
-        drop_cn0(tele, tr, T0 + 40 * MIN, T0 + 60 * MIN, 15.0)
-    eng = run_engine(cfg, tele, make_sda(cfg))
-    lc = eng.lifecycle
-    sw = [a for a in lc.alarms.values() if a.cls == "SPACE_WEATHER" and a.state == AlarmState.CONFIRMED]
-    assert len(sw) == 1
-    bogus = lc.create("JAMMING", T0 + 61 * MIN, T0 + 40 * MIN, {"T1", "T2", "T3"}, AlarmState.ALARM, 50.0, end=T0 + 60 * MIN)
-    bogus.records = [BatchRecord(r.t0, r.tractors, 0.5, 50.0, True, r.findings) for r in sw[0].records]
-    run = eng.watchdog.run(T0 + 65 * MIN)
-    assert bogus.state == AlarmState.RETRACTED and bogus.reason in ("RECLASSIFIED", "EXPLAINED_BY_OTHER_CAUSE")
-    assert any("JAMMING" in x and ("->" in x or "explained" in x) for x in run.actions)
+    drop_cn0(tele, "T2", T0 + 40 * MIN, T0 + 60 * MIN, 12.0)
+    oscillate_cn0(tele, "T2", T0 + 40 * MIN, T0 + 60 * MIN)
+    t_avail = T0 + 80 * MIN
+    sda = make_sda(cfg, rfi=[{"id": "RFI-LATE", "t_event": T0 + 41 * MIN, "t_avail": t_avail}])
+    eng = run_engine(cfg, tele, sda)
+    farm = eng.episodes.farms[0]
+    assert farm.closed_t < t_avail
+    jam = confirmed(eng, "JAMMING")
+    assert len(jam) == 1 and jam[0].tractors == {"T2"}
+    assert jam[0].created_t >= t_avail
+    assert any(h["reason"] == "UNATTRIBUTED" for a in eng.lifecycle.alarms.values() for h in a.history)
+    assert any("RFI-LATE" in e for e in jam[0].evidence)
 
 
 def test_late_rfi_strengthens_jamming(cfg):
@@ -128,4 +130,6 @@ def test_parked_alarm_retracted(cfg):
     drop_cn0(tele, "T2", T0 + 40 * MIN, T0 + 60 * MIN, 9.0)
     eng = run_engine(cfg, tele, make_sda(cfg))
     assert not confirmed(eng)
-    assert any(a.reason == "PARKED" for a in eng.lifecycle.alarms.values())
+    # v2.1 §2 option 4: parked batches never open an episode, so nothing is raised that would need a PARKED retraction
+    assert not eng.episodes.tr_eps
+    assert all(a.state.value != "CONFIRMED" for a in eng.lifecycle.alarms.values())

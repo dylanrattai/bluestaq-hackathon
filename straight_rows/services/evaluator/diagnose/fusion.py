@@ -11,7 +11,10 @@ from core.srtypes import FINDING_IDS, EvaluationResult
 
 
 class Fusion:
-    def __init__(self, cfg: dict[str, Any]):
+    """`episode=True` builds the episode-level network: same links, leaks = the background rate of a finding being
+    present over a whole episode (v2.1 §9.1, `fusion.leaks_episode`); the default is the per-batch network."""
+
+    def __init__(self, cfg: dict[str, Any], episode: bool = False):
         fu = cfg["fusion"]
         self.causes: list[str] = list(fu["causes"])
         self.findings: list[str] = list(FINDING_IDS)
@@ -22,6 +25,9 @@ class Fusion:
         self.bf_alarm = float(fu["bf_alarm"])
         self.leak = np.full(self.nf, float(fu["leak_default"]))
         self.leak[self.findings.index("F9")] = float(fu["leak_f9"])
+        over = fu.get("leaks_episode") if episode and fu.get("leaks_episode") else fu.get("leaks") or {}
+        for fid, q in over.items():
+            self.leak[self.findings.index(fid)] = float(q)
         self.P = np.zeros((self.nf, self.nc))
         for fid, row in fu["links"].items():
             for c, p in row.items():
@@ -57,7 +63,10 @@ class Fusion:
 
     def evaluate(self, tractor: str, t0: float, present: Sequence[bool], severity: Sequence[float],
                  missing: Sequence[bool]) -> EvaluationResult:
-        ll = self.loglik(present, severity, missing)
+        return self.evaluate_ll(tractor, t0, self.loglik(present, severity, missing))
+
+    def evaluate_ll(self, tractor: str, t0: float, ll: np.ndarray) -> EvaluationResult:
+        """Posterior/BF from a log-likelihood vector over the cause sets (v2.1 §4: a farm sums several tractors')."""
         lw = self.log_prior + ll
         m = lw.max()
         w = np.exp(lw - m)

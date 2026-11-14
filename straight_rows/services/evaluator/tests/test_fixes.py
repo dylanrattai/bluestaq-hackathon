@@ -19,11 +19,15 @@ def confirmed(eng, cls=None):
 def frac_present(eng, tr, fid, t_on, t_off):
     b0 = int((t_on - eng.t0s[0]) // 30)
     b1 = int((t_off - eng.t0s[0]) // 30)
-    return eng.fv_present[tr][b0:b1, J[fid]].mean()
+    info = ~eng.fv_missing[tr][b0:b1, J[fid]]          # v2.1 §1: headland-turn batches carry no information
+    return eng.fv_present[tr][b0:b1, J[fid]][info].mean() if info.any() else 0.0
 
 
-# ---------------------------------------------------------------- Fix 1
-def test_fix1_recovery_ends_event_and_stacked_step():
+# ---------------------------------------------------------------- Fix 1 (with the Update v2 §2 reference rule)
+def test_fix1_recovery_and_stacked_step_with_frozen_reference():
+    """The episode controller freezes the reference at the onset and thaws it at the close (Update v2 §2): the
+    in-event recovery CUSUM still marks the partial recovery and the stacked step (F11), but the frozen reference is
+    never rebuilt in-event; after the thaw the channel runs on fallback until 30 clean batches exist."""
     from core.config import load_config
     cfg = load_config()
     rng = np.random.default_rng(11)
@@ -32,25 +36,32 @@ def test_fix1_recovery_ends_event_and_stacked_step():
     level = np.full(900, 45.0)
     level[120:240] = 35.0            # event 1: 10 dB drop for 60 min
     level[240:480] = 41.0            # partial recovery to -4 dB
-    level[480:600] = 31.0            # event 2: a new 10 dB drop 2 h later
+    level[480:600] = 31.0            # event 2: a new 10 dB drop
     level[600:] = 41.0
     level[180:210] -= 6.0            # a stacked 6 dB step inside event 1
-    runs, ends, f11_batches = [], [], []
+    runs, ends, f11_batches, mus = [], [], [], {}
     prev = False
     for b in range(900):
+        if b == 300:
+            ch.thaw()                # the farm episode closed here
         x = level[b] + rng.normal(0, 0.6, 30).mean()
         st = ch.update(b * 30.0, x)
         if st.present and not prev:
             runs.append((b, st.onset / 30.0))
+            if not ch.frozen and b < 300:
+                ch.freeze(st.onset)
         if st.ended_at is not None:
             ends.append((b, st.ended_at / 30.0))
         if st.stacked:
             f11_batches.append(b)
+        mus[b] = ch.mu
         prev = st.present
-    assert len(runs) >= 2, runs
-    assert abs(runs[0][1] - 120) <= 10 and abs(runs[1][1] - 480) <= 10   # CUSUM backtracking; the watchdog step fit refines
-    assert any(abs(e - 240) <= 2 for _, e in ends), ends       # event 1 ends on partial recovery, not at the old level
-    assert any(abs(e - 600) <= 2 for _, e in ends), ends
+    assert abs(runs[0][1] - 120) <= 10
+    assert any(abs(e - 240) <= 2 for _, e in ends), ends            # partial recovery seen by the in-event CUSUM
+    assert all(abs(mus[b] - 45.0) < 0.3 for b in range(125, 300))    # frozen: never rebuilt in-event
+    assert all(mus[b] is None for b in range(300, 329))              # thawed: fallback until 30 clean batches
+    assert abs(mus[340] - 41.0) < 0.3                                # rebuilt from post-close batches only
+    assert any(abs(o - 480) <= 10 for _, o in runs)                  # event 2 against the rebuilt reference
     assert f11_batches and 180 <= f11_batches[0] <= 183 and max(f11_batches) <= 212
 
 
@@ -73,11 +84,14 @@ def test_fix2_machine_specific(cfg):
 
 
 def test_fix2_one_tractor_drop_is_not_jamming(cfg):
+    """Update v2: F12 is judged over the episode (no per-batch F12)."""
     tele = make_tele(2 * 3600)
     drop_cn0(tele, "T2", T0 + 40 * MIN, T0 + 60 * MIN, 12.0)
     oscillate_cn0(tele, "T2", T0 + 40 * MIN, T0 + 60 * MIN)
     eng = run_engine(cfg, tele, make_sda(cfg))
-    assert frac_present(eng, "T2", "F12", T0 + 41 * MIN, T0 + 59 * MIN) > 0.8
+    farm = eng.episodes.farms[0]
+    assert farm.members() == ["T2"]
+    assert farm.result["tractors"]["T2"]["findings"]["F12"]["present"]
     assert not confirmed(eng, "JAMMING")
 
 
@@ -132,11 +146,24 @@ def test_fix5_link_bursts(cfg):
 def test_fix6_min_cn0_dip(cfg):
     tele = make_tele(90 * MIN)
     t_dip = T0 + 45 * MIN + 7
+    set_sats(tele, "T3", t_dip - 120, t_dip + 120, 12)
     dip_cn0_min(tele, "T3", t_dip, 17, 8.0)
     eng = run_engine(cfg, tele, make_sda(cfg))
     mp = confirmed(eng, "MULTIPATH")
     assert len(mp) == 1 and mp[0].tractors == {"T3"}
     assert abs(mp[0].start - t_dip) <= 3 and abs(mp[0].end - (t_dip + 17)) <= 3
+
+
+def test_v2_min_cn0_dip_at_satellite_set_change_is_excluded(cfg):
+    """Update v2 §6: a min-C/N0 path within +-5 s of a satellite count change is the set changing."""
+    tele = make_tele(90 * MIN)
+    t_dip = T0 + 45 * MIN + 7
+    set_sats(tele, "T3", t_dip - 120, t_dip + 20, 12)
+    set_sats(tele, "T3", t_dip + 20, t_dip + 300, 13)
+    dip_cn0_min(tele, "T3", t_dip, 17, 8.0)
+    eng = run_engine(cfg, tele, make_sda(cfg))
+    assert not confirmed(eng, "MULTIPATH")
+    assert any(r["tractor"] == "T3" and r["excluded"] == "sat_set_change" for r in eng.episodes.dips)
 
 
 def test_fix6_dips_inside_jamming_are_explained(cfg):
@@ -152,11 +179,11 @@ def test_fix6_dips_inside_jamming_are_explained(cfg):
 
 # ---------------------------------------------------------------- Fix 7
 def test_fix7_confidence_is_bf_posterior(cfg):
+    """Update v2 §3: confidence = BF/(1+BF) of the episode-level classification, rounded to 3 decimals."""
     tele = make_tele(2 * 3600)
     ramp_xte(tele, "T3", T0 + 40 * MIN, T0 + 70 * MIN, 0.005)
     eng = run_engine(cfg, tele, make_sda(cfg))
     sp = confirmed(eng, "SPOOFING")
     assert len(sp) == 1
-    bfs = [r.bf / (1 + r.bf) for r in sp[0].records]
-    assert abs(sp[0].confidence - float(np.median(bfs))) < 1e-9
+    assert sp[0].confidence == round(sp[0].bf / (1 + sp[0].bf), 3)
     assert sp[0].confidence > 0.9

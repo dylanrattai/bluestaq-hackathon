@@ -19,7 +19,13 @@ def make_tele(duration_s: int = 7200, tractors=("T1", "T2", "T3"), seed: int = 1
     for i, tr in enumerate(tractors):
         cn0 = 45.0 + rng.normal(0, 0.6, n)
         cn0_min = cn0 - 5.0 + rng.normal(0, 0.5, n)
-        sats = 12.0 + rng.integers(-1, 2, n)
+        # satellites in view change a few times an hour, not every second: piecewise constant 12..13 (never a 2-satellite drop)
+        sats = np.empty(n)
+        k = 0
+        while k < n:
+            seg = int(rng.integers(300, 1200))
+            sats[k:k + seg] = 12.0 + rng.integers(0, 2)
+            k += seg
         fix = np.zeros(n)
         link = np.ones(n)
         speed = np.full(n, 4.5 if working else 0.0)
@@ -112,7 +118,8 @@ def ramp_xte(tele: Telemetry, tr: str, t_on: float, t_off: float, rate_m_per_s: 
 
 def make_sda(cfg, start: float = T0, duration_s: int = 7200, kp: float = 2.0, dst: float = -10.0, s4: float = 0.05,
              kp_storm: tuple | None = None, s4_storm: tuple | None = None, advisories=(), rfi=()) -> SdaFeeds:
-    """Quiet indices held across the run; kp_storm=(t_on, t_off, value); s4_storm likewise."""
+    """Quiet indices held across the run; kp_storm=(t_on, t_off, value); s4_storm likewise, or a list of them."""
+    s4_list = [s4_storm] if (s4_storm and not isinstance(s4_storm[0], (tuple, list))) else list(s4_storm or [])
     kp_recs, dst_recs, s4_recs = [], [], []
     t = start - 3 * 3600
     while t < start + duration_s + 3600:
@@ -128,8 +135,9 @@ def make_sda(cfg, start: float = T0, duration_s: int = 7200, kp: float = 2.0, ds
     t = start - 900
     while t < start + duration_s + 900:
         v = s4
-        if s4_storm and s4_storm[0] <= t < s4_storm[1]:
-            v = s4_storm[2]
+        for st in s4_list:
+            if st[0] <= t < st[1]:
+                v = st[2]
         s4_recs.append((t, v))
         t += 900
     advs = [Advisory(a.get("id", f"ADV-{i}"), a["start"], a["end"], a.get("type", "SPACE_WEATHER"), a.get("text", ""))
@@ -149,3 +157,33 @@ def run_engine(cfg, tele, sda, speed=None, out_dir=None, write_outputs=False, va
     eng.run()
     sink.close()
     return eng
+
+
+def storm(tele, t_on: float, t_off: float, db: float = 8.0, ramp_s: int = 600, seed: int = 3,
+          float_every_s: int = 1800, float_len_s: int = 600, float_tractors=None, dips_every_s: int = 2400) -> None:
+    """An equal-drop ionospheric storm on every tractor: ramped onset and recovery, extra scintillation variance,
+    RTK float for `float_len_s` every `float_every_s`, and short 17 s fades inside (none of them separate events)."""
+    rng = np.random.default_rng(seed)
+    a, b = idx(tele, t_on), idx(tele, t_off)
+    n = b - a
+    prof = np.ones(n)
+    r = min(ramp_s, n // 4)
+    prof[:r] = np.linspace(0, 1, r, endpoint=False)
+    prof[n - r:] = np.linspace(1, 0, r, endpoint=False)
+    for k, tr in enumerate(tele.tractors):
+        s = tele.series[tr]
+        s.cn0[a:b] -= db * prof
+        s.cn0_min[a:b] -= db * prof
+        s.cn0[a:b] += rng.normal(0, 0.6, n)                    # scintillation-like extra variance
+        if float_tractors is None or tr in float_tractors:
+            for t in range(int(t_on) + 300, int(t_off) - float_len_s, float_every_s):
+                set_fix(tele, tr, t, t + float_len_s, 1)
+        for t in range(int(t_on) + 900 + 137 * k, int(t_off) - 900, dips_every_s):
+            dip_cn0(tele, tr, t + 3, 17, 8.0)
+
+
+def flicker_sats(tele, tr: str, t_on: float, t_off: float, hi: int, lo: int, hi_s: int = 40, lo_s: int = 20) -> None:
+    s = tele.series[tr]
+    for t in range(int(t_on), int(t_off), hi_s + lo_s):
+        s.sats[idx(tele, t):idx(tele, min(t + hi_s, t_off))] = float(hi)
+        s.sats[idx(tele, min(t + hi_s, t_off)):idx(tele, min(t + hi_s + lo_s, t_off))] = float(lo)

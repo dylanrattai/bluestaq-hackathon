@@ -87,8 +87,9 @@ This replays everything, writes the normal outputs, then scores the confirmed al
 every labelled episode whether it was matched or missed, the onset error, which findings fired during it, the
 network's strongest causes, every overlapping alarm with its state and retraction reason, and a one-line verdict
 (RIGHT, or WRONG with the stage that failed: detector, strength, attribution, extent/tractors, watchdog). Extra
-confirmed detections that match no label are listed the same way. The labels are read by this tool only; nothing is
-tuned from them.
+confirmed detections that match no label are listed the same way. Since Decision v2.1 the labels are also read by
+`tools/calibrate.py` (§5), which writes `config_trained.yaml`; `config.yaml` stays the physics version. To run the
+trained version: `python main.py batch --config config_trained.yaml --data ../../data --out ../../out`.
 
 ## 2. Pinned dependencies
 
@@ -141,12 +142,11 @@ loss belongs to F7 [R20, R21]); F7 correction link down, judged on the trailing 
 from the correction-age ladder on the longest outage);
 F8 cross-track drift (upper CUSUM on the batch median of cross-track error during moving, working passes,
 headland turns masked; "no information" while the fix is DGPS or worse or inside the link→fix window, because a
-non-RTK solution carries decimetre guidance error by itself; in RTK float only a median beyond 0.3 m counts); F9 space weather active (Kp ≥ 7, Dst ≤ −100 nT, S4 ≥ 0.3, or an open
+non-RTK solution carries decimetre guidance error by itself; in RTK float only a median beyond the float tier's nominal 0.5 m accuracy counts [R18]); F9 space weather active (Kp ≥ 7, Dst ≤ −100 nT, S4 ≥ 0.3, or an open
 space-weather advisory; GLOBAL); F10 an RFI report that is *available* (event time + 30 min, no publish field
 exists), covers the tractor (semi-major axis as radius) and overlaps the batch (±30 min); F11 a stacked step on
-top of an open event (abrupt extra drop: a jammer switching on inside a storm); F12 machine-specific (at least one
-of this tractor's F1/F5/F6/F7/F8 findings is shown by no other working tractor, and for F1 the others are
-C/N0-clean): farm-scale causes share findings across machines, one-machine faults do not.
+top of an open event (abrupt extra drop: a jammer switching on inside a storm), which since Update v2 opens a
+sub-episode instead of entering the network; F12 machine-specific, judged over a whole episode (below).
 
 **Diagnosis network.** A two-layer leaky noisy-OR network in the style of QMR-DT [R22–R24]: six independent
 causes (the five classes plus OTHER, prior 0.01 each), twelve findings conditionally independent given the causes,
@@ -157,37 +157,101 @@ the most probable non-empty cause set (the explanation), which is what gives exp
 without hand-written vetoes [R26]. OTHER in the explanation with no class alarm is an *unattributed* live alarm
 that is never exported.
 
-**Lifecycle.** ALARM needs the candidate in 2 of the last 3 batches [R28] (MULTIPATH: 1). The onset is the
-earliest backdated CUSUM onset among the contributing findings (MULTIPATH: the dip's exact 1 Hz start). Multi-
-machine causes (SPACE_WEATHER, JAMMING) group tractors into one alarm; SPACE_WEATHER includes every working
-tractor. An alarm closes after one batch below BF 3 (off-delay [R29]); the end is when the statistic returned to 0.
+**Episodes first, causes second (Update v2).** The scorer counts episodes, so the episode is the unit of decision:
+first find *when* something is wrong, then decide *what* it is, once per episode. Three tracks:
 
-**Watchdog (every 5 min of data time, and once at the end).** Using only data ≤ now: (1) re-localise each
-boundary within ±10 min by an exact single-change search on 1 Hz data — a two-segment step fit for JAMMING,
+- *Signal* (SPACE_WEATHER, JAMMING, EQUIPMENT_FAULT). Per tractor per batch A = F1 ∨ F2 ∨ F6_raw ∨ F7 (F6_raw: fix
+  degraded > 50% of the batch or satellites ≥ 2 below the reference, no chain rule). A tractor episode opens when A
+  holds in 2 of the last 3 batches [R28] (onset = earliest backdated CUSUM onset) and closes after 10 A-false
+  batches, which bridges pulsed sources. Overlapping tractor episodes form one *farm episode*. When it opens, every
+  tractor's C/N0 level, log-variance and satellite references freeze at the farm onset (clean batches before it,
+  no max-age); when it closes they are discarded and rebuilt from post-close batches (fallback scales until 30
+  clean batches). Findings are judged over the episode: F1, F2, F6, F9 present when they hold in ≥ 1/3 of the
+  episode's batches (F6 also by a flicker clause: ≥ 3 satellite drop-and-recover events while F12 holds); F7 on
+  ≥ 30 s down or ≥ 3 outages within the episode; F3/F4 from each tractor's episode-median drop; F10 from any report
+  available by now; F12 when every other working tractor had F1 in < 10% of the batches and no episode of its own.
+  The network runs once per tractor on these (F5, F8 held absent, F11 missing); tractors are grouped by their most
+  probable class, and each group at BF ≥ 20 becomes one detection (SPACE_WEATHER takes every working tractor). OTHER
+  or weaker groups are logged as unattributed and never exported. Confidence = BF/(1+BF).
+- *Stacked step (§4)*: inside an open farm episode, the in-event step CUSUM firing on ≥ 2 tractors within 2 batches
+  opens a sub-episode, classified against the in-event reference; a class different from the parent's at BF ≥ 20
+  is a separate detection (jamming switching on inside a storm), otherwise it is absorbed.
+- *Position* (SPOOFING): the F8 drift CUSUM with a position-domain F12; an episode opens on SPOOF BF ≥ 20 in 2 of 3
+  batches and may overlay any signal episode (a spoofer is built to look normal in the signal).
+- *Short dip* (MULTIPATH): an F5 dip counts only when no other episode is open on that tractor within ±60 s; the
+  network on {F5, F12 (other machines' C/N0 within 2σ over the dip ±10 s)}; the detection has the dip's exact
+  1 Hz extent and is never merged. Every candidate is written to `out/dips.csv`.
+
+**Decision v2.1 changes to the signal track.**
+- *Headland turns are a known non-event.* A batch with a heading change > 30° (a row-end turn), or whose first 12 s
+  follow one, is a *turn batch*: F2, F5 and the satellite half of F6 carry no information there, the batch stays
+  out of the log-variance and satellite references, and it neither opens nor closes an episode. In the dev data
+  1398 of 1409 dip candidates were turns (a ~17 s min-C/N0 dip with a satellite set change, ~8 s before to ~10 s after
+  the turn, on every machine at once).
+- *Only WORKING, non-turn batches count* toward opening (2 of the last 3) and closing (10 A-false); A = F1 ∨ F6_raw ∨ F7
+  (F2 alone no longer opens or holds an episode; it still counts in classification).
+- *Farm episodes by common onset*: a tractor episode joins a farm episode only if its onset is within 5 min of the farm
+  onset (or the tractor is already a member and re-opens inside it); anything else is its own episode, still
+  classified, never merged because of overlap.
+- *Farm-level decision for SPACE_WEATHER and JAMMING*: one cause set for the whole farm episode; the log-likelihoods of
+  the per-tractor findings (F1, F2, F6, F7) are summed over the tractors with F1 present, the shared ones (F3, F4, F9,
+  F10, F12) count once, and F5/F8 (own tracks) carry no information. The one-machine classes (EQUIPMENT_FAULT) stay per
+  tractor, one detection per machine.
+- *Safety valve*: a tractor episode open 6 h without any class at BF ≥ 20 is force-closed as unattributed, logged,
+  and that tractor's frozen reference is discarded and rebuilt.
+- *Confidence* = the episode posterior under even prior odds, P = BF/(1+BF), from the episode-level evidence (each
+  known sign present raises it, each missing one lowers it); the evidence says which signs were seen, e.g.
+  `signs seen 4 of 5 (F1, F2, F3, F9; F6 missing), P = 0.999` (known signs = links ≥ 0.50 in the table).
+
+Live, each open episode is one alarm ID per class group: WATCH while no class has BF ≥ 20, ALARM with the
+provisional class once one does, `RECLASSIFIED` in the alarm's history when the class changes.
+
+**Watchdog (every 5 min of data time, and once at the end).** Using only data ≤ now: (1) re-run closed episodes'
+classification with everything now available (late RFI reports); (2) re-localise each boundary within ±10 min of
+the episode's raw boundary by an exact single-change search on 1 Hz data — a two-segment step fit for JAMMING,
 EQUIPMENT_FAULT and every end, a continuous hinge (flat-then-linear, CPOP's model restricted to one change [R30])
-for SPOOFING and SPACE_WEATHER onsets; extent is decided separately from class confidence [R31]; (2) merge
-same-class alarms closer than the class gap (SW 30, JAM 10, SPOOF 5, EQUIP 10 min; MULTIPATH never);
-(3) re-run the network over the alarm's span with everything now available (late RFI reports): if the class has
-left the explanation for most of the span it is retracted `EXPLAINED_BY_OTHER_CAUSE` or `RECLASSIFIED` into the
-class that now wins; (4) shorter than 2 batches → `NOT_SUSTAINED`, entirely parked → `PARKED`, otherwise
-**CONFIRMED** (a later pass may still retract it); a MULTIPATH alarm lying inside a JAMMING alarm on the same
-tractor is retracted as explained by the jammer's pulses. Confidence is the median over the alarm's batches of
-BF/(1+BF), the posterior under even prior odds (the 1% prior is kept for choosing the cause set).
+for SPOOFING and SPACE_WEATHER onsets; extent is decided separately from class [R31]; (3) merge consecutive
+SPACE_WEATHER alarms ≤ 30 min apart (the other classes already bridge 5 min through the close rule); (4) shorter
+than 2 batches → `NOT_SUSTAINED`, entirely parked → `PARKED`, otherwise clipped to working time and **CONFIRMED**.
 
 **Evidence.** Built from the final span: the main measurement with values and ladder levels, cross-tractor
 geometry (equal vs unequal drops, other machines unaffected), solution impact (fix state), SDA context with record
-IDs and availability times, and the decision (cause set, Bayes factor, re-localisation).
+IDs and availability times, and the decision (the episode's class, Bayes factor and the episode-level findings
+with their fractions, re-localisation).
 
-## 5. How the labelled data was used
+## 5. Use of labelled data
 
-`data/labels/train_episodes.json` is read by exactly one module, `tools/dev_check.py` (`--dev`), which prints per-class
-precision/recall/F1, macro-F1, onset credit and the diagnostic score (`out/dev_report.md`). It is a held-out
-verification tool: the labels were not used to build, tune or select anything, and the build did not run it.
-Every threshold in `config.yaml` comes from physics, standards or the cited papers (each entry names its source).
-The first dev run (13.3/40) was reviewed by the owner, who approved Fix Spec v1.1: structural fixes (event ends by
-recovery, F11/F12, the 5-min link window, the local multipath reference) and physics-justified link changes, none of
-them thresholds fitted to the labels. The dev check was then run once more and nothing changed afterwards
-(`out/dev_findings.md` lists every deviation and open question).
+`data/labels/train_episodes.json` (12 labelled episodes in the development period, 2026-05-04/05) is read by two
+modules: `tools/dev_check.py` (`--dev`, the diagnostic score in `out/dev_report.md`) and, since Decision v2.1 (the
+owner lifted the earlier no-tuning rule), `tools/calibrate.py` + `tools/calib_report.py`, which learn the trained
+configuration. The evaluation window is never read by either. What was learned, and how (`out/calibration.md` has
+every number):
+
+- **Leaks** (P(finding | no cause)), measured directly on the background: WORKING dev batches outside every labelled
+  span ± 10 min (16.9 h per tractor). Per batch: (k + 1) / (n + 2) over batches with information; per episode: the
+  same over a sliding window as long as the median labelled episode (42 min), "present" when φ ≥ φ_present in it.
+  Clamped to [0.005, 0.20]. F12 has no per-batch value, so it keeps the physics leak.
+- **Links** (P(finding | cause)), shrunk toward the physics table with two pseudo-episodes:
+  (k_cj + 2·q_cj) / (n_c + 2), where k_cj counts the class-c labelled episodes whose episode-level finding j was
+  present (pipeline findings over the label's span and tractors) and q_cj is the physics value (blank = 0.025).
+- **Thresholds**: `fusion.bf_alarm` ∈ {10, 20, 50} × `episodes.phi_present` ∈ {0.2, 0.333, 0.5} on cached episodes;
+  `episodes.close_batches` ∈ {6, 10, 20}, `position.float_band_m` ∈ {0.3, 0.5, 0.8} and the turn threshold
+  ∈ {20°, 30°, 45°} by coordinate descent on real replays. No other knob was searched.
+- **Honest scoring**: everything learned is re-learned inside each leave-one-episode-out (LOEO) fold without the
+  held-out episode; thresholds are chosen per fold on the other 11 episodes plus background extras.
+- **Guardrail**: LOEO was more than 8 points below in-sample (23.0 vs 31.8), so the trained configuration keeps the
+  learned links and leaks with the physics thresholds (the search had picked the physics thresholds anyway). The
+  gap comes from the links (12 episodes, one to three per class); the learned leaks alone change nothing
+  (29.5 in-sample and LOEO, the same as physics).
+- **Not learned**: no new findings, tracks or classes; confidence is the network posterior, not recalibrated on 12
+  episodes. MULTIPATH: the two labelled dips are indistinguishable from the ~1000 headland-turn dips (best feature
+  pair separates 89% < 95%), so no gate was added and no MULTIPATH is exported.
+
+| version | dev score /40 in-sample | LOEO |
+|---|---|---|
+| v1.1 | 18.9 | 18.9 (nothing learned) |
+| v2.1-physics (`config.yaml`) | 29.5 | 29.5 (nothing learned) |
+| v2.1-trained (`config_trained.yaml`) | 31.8 | 23.0 |
 
 ## 6. Known failure modes
 
@@ -197,8 +261,16 @@ them thresholds fitted to the labels. The dev check was then run once more and n
 - Spoofing that drags the position along the row (not across it) is invisible in cross-track error; spoofing that
   also collapses C/N0 is attributed to the C/N0 cause (F8 is suppressed while signal health is degraded).
 - Absolute fallback scales assume a typical receiver (≥ 40 dB-Hz nominal).
-- Links and leaks are principled guesses, not fitted; confidence is a per-batch model posterior under a 1% prior,
-  not a calibrated probability.
+- Physics links and leaks are principled guesses; the trained ones come from 12 episodes and overfit (LOEO, §5).
+  Confidence is BF/(1+BF) of the episode-level classification, not a calibrated probability.
+- One cause per tractor per signal episode: a link fault on one machine during a storm is reported as whichever
+  cause wins on that machine, not both (only a stacked step splits a signal episode).
+- A level that settles permanently below the pre-episode reference keeps an episode open until the 6 h safety
+  valve closes it unattributed and rebuilds that tractor's reference.
+- MULTIPATH is not exported: the labelled dips sit on headland turns and look like every other turn dip.
+- A jam inside a storm (TRN-05) needs an abrupt stacked step on ≥ 2 tractors; the physics table misses it.
+- A short multipath dip that straddles a batch boundary moves two batch means, opens a 2-batch signal episode, and
+  is then excluded from the short-dip track (`out/dips.csv` lists such dips as excluded by a signal episode).
 - Advisories carry no end time; the duration is parsed from the text (lower bound of "24–48 h"), else 24 h.
 - The Jetson runs the NumPy path; the GPU is unused in v1.
 
@@ -215,16 +287,18 @@ of GNSS.
 - **ASK DYLAN:** `participant.github_handle` and `repository_url` in `config.yaml`.
 - The ALARM rule uses the most probable *non-empty* cause set: with a 1% prior the empty set stays the literal MAP
   until a posterior exceeds 0.5, which would contradict the spec's own sanity targets (e.g. F5 ⇒ MULTIPATH).
-- The max-age rule for a frozen reference is paused while a finding is open on that channel; otherwise every event
-  longer than an hour would switch to absolute scales mid-event.
-- Alarms that span a parked night are split into one detection per working segment (a parked night separates two
-  guidance episodes under the guide's scoring rules).
-- Heading is derived from lat/lon; turns in this data are instantaneous row hops, so only the turn samples are
-  masked rather than whole batches.
+- Update v2 replaces the frozen-reference max-age pause: references freeze per farm episode and are discarded at
+  its close. Alarms spanning a parked night are no longer split (the 10-batch close rule ends an episode when the
+  machines go quiet).
+- Heading is derived from lat/lon; turns in this data are instantaneous row hops. F8 masks the turn samples;
+  v2.1 marks whole turn batches (the turn, or ≤ 12 s after it) as no information for F2, F5 and the satellite half of F6.
+- v2.1 deviations (owner to confirm): SPACE_WEATHER→F2 0.025 → 0.50 (S4 *is* C/N0 intensity fluctuation and the guide
+  says "elevated scintillation"; with F2 summed per tractor in the farm-level decision, 0.025 called synthetic
+  storms JAMMING); F6 is *no information* (not absent) while C/N0 is not normal, since its chain rule defines it only
+  then (as absent it counted against SPACE_WEATHER once per tractor); the log-variance channel keeps the history a
+  Fix 3 restart drops, so the episode freeze one batch later still has a pre-event reference (before, F2 had no
+  reference for whole episodes); F5/F8 carry no information in the farm-level sum.
 - F10 severity uses the report's own `confidence` field when present (else 1.0).
-- Fix Spec v1.1 is applied in full except one item: the frozen pre-event reference stays valid while its event is
-  open (`reference.pause_max_age_in_event`, switchable). The literal 60-min max-age would push any event longer
-  than an hour onto absolute scales mid-event; Fix 1 removes the deadlock that motivated the revert.
 - Two link values beyond the v1.1 table: EQUIPMENT_FAULT→F2 0.20 (an intermittent antenna makes C/N0 noisy; needed
   by Fix 2's own test) and nothing else. An equal stacked step on all machines inside a storm leaves JAMMING at
   BF ≈ 2 under the table (F4/F2/F5/F10 absent), so Fix 3's test uses an unequal step.

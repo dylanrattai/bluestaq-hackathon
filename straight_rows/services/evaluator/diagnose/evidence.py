@@ -33,6 +33,9 @@ def _pre_ref(feats, b_lo: int, n: int = 120) -> float:
 
 
 def _first_record_mu(a: Alarm, tr: str) -> float | None:
+    mu = ((a.extra.get("episode") or {}).get("ref_mu") or {}).get(tr)
+    if mu is not None and not math.isnan(mu):
+        return float(mu)                 # the farm episode's frozen pre-onset reference (Update v2 §2)
     for rec in a.records:
         f1 = rec.findings.get(tr, {}).get("F1")
         if f1 and f1.get("mu") is not None and not f1.get("fallback"):
@@ -192,12 +195,10 @@ def build_evidence(a: Alarm, feats: dict[str, Any], tele, sda, ladders, cfg: dic
     if sda_bits:
         out.append("; ".join(sda_bits))
 
-    # 5. decision
-    posts = [r.post for r in a.records] or [0.0]
-    bfs = [r.bf for r in a.records] or [0.0]
-    n_in = sum(1 for r in a.records if r.in_expl)
-    dec = (f"most probable cause set {{{cls}}} in {n_in}/{len(a.records)} batches, median BF {np.median(bfs):.0f}, "
-           f"median posterior {np.median(posts):.2f}")
+    # 5. decision (Update v2: one classification per episode, on findings judged over the whole episode)
+    dec = _decision(a)
+    if a.extra.get("signs"):
+        dec = a.extra["signs"] + "; " + dec           # v2.1 §5
     rl = a.relocalised
     if rl:
         dec += "; watchdog " + ", ".join(f"{k} moved {v.get('shift_s', 0):+.0f} s ({v.get('method')})" for k, v in rl.items() if isinstance(v, dict))
@@ -206,3 +207,36 @@ def build_evidence(a: Alarm, feats: dict[str, Any], tele, sda, ladders, cfg: dic
     out.append(dec)
     out = [s for s in out if s and s.strip()]
     return out[:5] if len(out) >= 2 else (out + ["see alarm history"])[:5]
+
+
+def _decision(a: Alarm) -> str:
+    ep = a.extra.get("episode") or {}
+    if a.track == "dip":
+        f12 = a.extra.get("f12") or {}
+        ctx = "other machines' C/N0 within 2 sigma" if f12.get("present") else (
+            "no other working machine to compare" if f12.get("missing") else "other machines also disturbed")
+        return f"short-dip track: MULTIPATH BF {a.bf:.0f} on {{F5, F12}} ({ctx}); no other episode on {','.join(sorted(a.tractors))} within 60 s"
+    per = ep.get("tractors") or {}
+    bits = []
+    for tr in sorted(per):
+        if tr not in a.tractors:
+            continue
+        fd = per[tr].get("findings", {})
+        pres = []
+        for fid in ("F1", "F2", "F3", "F4", "F6", "F7", "F8", "F9", "F10", "F12"):
+            f = fd.get(fid) or {}
+            if f.get("present"):
+                phi = f.get("phi")
+                pres.append(f"{fid} {phi:.0%}" if isinstance(phi, (int, float)) else fid)
+        bits.append(f"{tr} {per[tr].get('map', a.cls)} BF {per[tr].get('bf', {}).get(a.cls, a.bf):.0f} on " + (", ".join(pres) or "nothing"))
+    kind = {"signal": "signal episode", "sub": "stacked-step sub-episode", "position": "position-track episode"}.get(a.track, "episode")
+    if ep.get("level") == "farm":
+        jt = (ep.get("joint") or {}).get("tractors") or []
+        dec = (f"{kind} {ep.get('id', a.episode)}: {a.cls} BF {a.bf:.0f} decided once for the farm over "
+               f"{','.join(jt)} (per-tractor findings summed, shared ones once)")
+        return dec + ("; unattributed: " + ", ".join(f"{tr} {c}" for tr, (c, _) in sorted(ep["unattributed"].items()))
+                      if ep.get("unattributed") else "")
+    dec = f"{kind} {ep.get('id', a.episode)}: {a.cls} BF {a.bf:.0f}" + ("; " + "; ".join(bits[:3]) if bits else "")
+    if ep.get("unattributed"):
+        dec += "; unattributed: " + ", ".join(f"{tr} {c}" for tr, (c, _) in sorted(ep["unattributed"].items()))
+    return dec

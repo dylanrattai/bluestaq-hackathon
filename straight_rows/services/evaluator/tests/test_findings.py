@@ -18,7 +18,8 @@ def batches(eng, t_on, t_off):
 
 def frac_present(eng, tr, fid, t_on, t_off):
     b0, b1 = batches(eng, t_on, t_off)
-    return eng.fv_present[tr][b0:b1, J[fid]].mean()
+    info = ~eng.fv_missing[tr][b0:b1, J[fid]]          # v2.1 §1: headland-turn batches carry no information
+    return eng.fv_present[tr][b0:b1, J[fid]][info].mean() if info.any() else 0.0
 
 
 def test_f3_equal_drop_all_tractors(cfg):

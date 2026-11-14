@@ -1,4 +1,5 @@
-"""Diagnostic scorer against the development labels (spec §10). Diagnostic only: nothing is tuned from it.
+"""Diagnostic scorer against the development labels (spec §10). Since Decision v2.1 the labels also train
+config_trained.yaml (tools/calibrate.py); this module itself only scores.
 
 Run through the CLI:  python main.py batch --dev --data ../../data --out ../../out   (or `python main.py dev ...`)
 
@@ -25,7 +26,10 @@ from core.srtypes import ACTIONS, FINDING_IDS, AlarmState
 log = logging.getLogger("sr.dev")
 CLASSES = list(ACTIONS.keys())
 # earlier dev-check results, for the before/after table (never used by the pipeline)
-PREVIOUS = {"v1 (2026-11-14, before Fix Spec v1.1)": {"score": 13.3, "macro_f1": 0.333, "found": 4, "truth": 12, "extras": 11, "onset_credit": 0.33}}
+PREVIOUS = {"v1 (2026-11-14, before Fix Spec v1.1)": {"score": 13.3, "macro_f1": 0.333, "found": 4, "truth": 12, "extras": 11, "onset_credit": 0.33},
+            "v1.1 (first run, before Update v2)": {"score": 18.9, "macro_f1": 0.444, "found": 7, "truth": 12, "extras": 33, "onset_credit": 0.52},
+            "v2 (before Decision v2.1)": {"score": 12.6, "macro_f1": 0.305, "found": 4, "truth": 12, "extras": 3, "onset_credit": 0.33},
+            "v2.1-physics (config.yaml)": {"score": 29.5, "macro_f1": 0.731, "found": 9, "truth": 12, "extras": 1, "onset_credit": 0.75}}
 
 
 def iou_time(a0, a1, b0, b1) -> float:
@@ -181,7 +185,7 @@ def run_dev_check(eng, cfg: dict, data_dir: Path, out_dir: Path) -> dict:
     tp = sum(p["tp"] for p in res["per_class"].values())
     fp = sum(p["fp"] for p in res["per_class"].values())
     n_t = len(truth)
-    lines = ["# Dev check: pipeline vs development labels (diagnostic only, nothing tuned)", "",
+    lines = ["# Dev check: pipeline vs development labels (diagnostic score)", "",
              f"Development period {iso(dev0)} .. {iso(dev1)}: {n_t} labelled episodes, {len(dets)} confirmed detections.", "",
              "## Accuracy rating", "",
              f"- **Diagnostic score {res['score']:.1f} / 40** (25 x macro-F1 + 15 x mean onset credit)",

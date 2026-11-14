@@ -70,6 +70,11 @@ class CusumChannel:
       drives two more CUSUMs: recovery (ends the event at its backtracked reset) and, when `stack` is set,
       a stacked drop (F11) which restarts the in-event reference. A batch back inside the pre-event band also
       ends the event. After an end the reference is rebuilt from post-event clean batches.
+
+    Update v2 §2: an episode controller may `freeze` the reference at a farm-episode onset (clean batches before
+    the onset only; no max-age, no re-learning, no rebuild on an in-event recovery) and `thaw` it when the farm
+    episode closes, which discards it: the channel then runs on fallback scales until `min_clean_batches` clean
+    post-close batches exist.
     """
 
     def __init__(self, name: str, cfg: dict[str, Any], h: float, sides: tuple[str, ...] = ("lower",),
@@ -87,12 +92,13 @@ class CusumChannel:
         self.win_s = float(ref["trailing_min"]) * 60
         self.min_clean = int(ref["min_clean_batches"])
         self.max_age = float(ref["max_age_min"]) * 60
-        self.pause_age_in_event = bool(ref.get("pause_max_age_in_event", True))
+        self.frozen = False
         self.cap = float(ref["sigma_inflation_cap"])
         self.sigma_floor = float(sigma_floor)
         self.ev_warmup = int(cu.get("in_event_warmup_batches", 2))
         self.stack_max_rise = float(cu.get("stacked_max_rise_batches", 2))
         self.hist: deque[tuple[float, float, bool]] = deque()
+        self.pre_restart: list[tuple[float, float, bool]] = []   # history dropped by the last restart (for freeze)
         self.mu = self.sigma = self.sigma_eff = None
         self.rho = 0.0
         self.n_clean = 0
@@ -128,7 +134,7 @@ class CusumChannel:
         self.s_lo = self.s_hi = 0.0
         self.onset_lo = self.onset_hi = None
         self._clear_event()
-        if rebuild:
+        if rebuild and not self.frozen:
             # the level settled somewhere else (partial recovery): the pre-event reference is gone with the event,
             # rebuild it from post-event clean batches
             self.hist.clear()
@@ -141,6 +147,8 @@ class CusumChannel:
     def restart(self, seed_sigma: float | None = None, min_batches: int = 2) -> None:
         """Re-reference from now on (Fix 3: F2 against the in-event variance). The first `min_batches` batches
         form a provisional reference with sigma floored at `seed_sigma`."""
+        # v2.1: keep what the restart drops; an episode opening a batch later freezes on the pre-event history
+        self.pre_restart = list(self.hist)
         self.hist.clear()
         self.mu = self.sigma = self.sigma_eff = None
         self.ref_t = None
@@ -150,16 +158,34 @@ class CusumChannel:
         self.restart_min = max(int(min_batches), 2)
         self.restart_sigma = seed_sigma
 
-    def _recompute_reference(self, now: float) -> None:
-        xs = [x for (t, x, c) in self.hist if c and (now - t) <= self.win_s]
-        self.n_clean = len(xs)
-        need = self.min_clean
-        provisional = False
-        if len(xs) < need and self.restart_min is not None and len(xs) >= self.restart_min:
-            provisional = True
-        elif len(xs) < need:
+    # ---- episode-level control (Update v2 §2)
+    def freeze(self, t_onset: float) -> None:
+        """Freeze the reference at a farm-episode onset, from clean batches that started before it."""
+        if self.frozen:
             return
-        a = np.asarray(xs, dtype=float)
+        self.frozen = True
+        seen = {t for (t, _, _) in self.hist}
+        rows = list(self.hist) + [r for r in self.pre_restart if r[0] not in seen]
+        xs = [x for (t, x, c) in rows if c and t < t_onset and (t_onset - t) <= self.win_s]
+        if len(xs) >= self.min_clean:
+            self._fit(np.asarray(xs, dtype=float), t_onset, provisional=False)
+
+    def thaw(self) -> None:
+        """The farm episode closed: discard the pre-episode reference and rebuild from post-close batches only."""
+        self.frozen = False
+        if self.present:
+            self._close_event(None)
+        self.hist.clear()
+        self.pre_restart = []
+        self.mu = self.sigma = self.sigma_eff = None
+        self.ref_t = None
+        self.n_clean = 0
+        self.restart_min = self.restart_sigma = None
+        self.s_lo = self.s_hi = 0.0
+        self.onset_lo = self.onset_hi = None
+        self.zero_streak = 0
+
+    def _fit(self, a: np.ndarray, now: float, provisional: bool) -> None:
         mu = float(a.mean())
         sigma = float(a.std(ddof=1)) if len(a) > 1 else 0.0
         sigma = max(sigma, self.sigma_floor)
@@ -170,6 +196,21 @@ class CusumChannel:
         rho = float((d[:-1] * d[1:]).sum() / den) if den > 0 else 0.0
         infl = math.sqrt((1 + rho) / (1 - rho)) if 0.0 < rho < 1.0 else 1.0
         self.mu, self.sigma, self.rho, self.sigma_eff, self.ref_t = mu, sigma, rho, sigma * min(infl, self.cap), now
+        self.n_clean = len(a)
+
+    def _recompute_reference(self, now: float) -> None:
+        if self.frozen:
+            return
+        xs = [x for (t, x, c) in self.hist if c and (now - t) <= self.win_s]
+        self.n_clean = len(xs)
+        need = self.min_clean
+        provisional = False
+        if len(xs) < need and self.restart_min is not None and len(xs) >= self.restart_min:
+            provisional = True
+        elif len(xs) < need:
+            return
+        self._fit(np.asarray(xs, dtype=float), now, provisional)
+        self.n_clean = len(xs)
         if not provisional:
             self.restart_min = None
             self.restart_sigma = None
@@ -177,7 +218,7 @@ class CusumChannel:
     def reference_valid(self, now: float) -> bool:
         if self.mu is None or self.ref_t is None:
             return False
-        if self.present and self.pause_age_in_event:
+        if self.frozen:
             return True
         return (now - self.ref_t) <= self.max_age
 
@@ -282,7 +323,8 @@ class CusumChannel:
                 ended_at = t0
                 self._close_event(t0)
         clean = not self.present
-        self.hist.append((t0, x, clean))
+        if not self.frozen:
+            self.hist.append((t0, x, clean))
         if self.s_lo == 0.0 and self.s_hi == 0.0 and not self.present:
             self.zero_streak += 1
         else:
@@ -291,6 +333,11 @@ class CusumChannel:
         if not frozen or self.mu is None:
             self._recompute_reference(now)
         return self._state(t0, float(x), False, fallback, z, ended_at)
+
+    def skip(self, t0: float) -> CusumState:
+        """v2.1 §1: a batch that carries no information for this channel (headland turn): no update to the run, the
+        reference or its history; the event (if any) stays open."""
+        return self._state(t0, float("nan"), True, not self.reference_valid(t0 + self.batch_s), float("nan"), None)
 
     def close_run(self) -> None:
         if self.present:

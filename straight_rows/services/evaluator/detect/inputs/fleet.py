@@ -1,4 +1,5 @@
-"""F12 machine-specific: is this tractor the only working machine showing anything? (Fix 2)."""
+"""UNUSED since Update v2 (§8 removes per-batch F12; F12 is judged per episode in diagnose/episodes.py).
+Kept only as the v1.1 reference. F12 machine-specific: is this tractor the only working machine showing anything? (Fix 2)."""
 from __future__ import annotations
 
 import math

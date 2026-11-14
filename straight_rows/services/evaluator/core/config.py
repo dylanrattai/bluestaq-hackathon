@@ -11,7 +11,7 @@ import yaml
 HERE = Path(__file__).resolve().parent.parent   # the evaluator directory (config.yaml lives there)
 
 REQUIRED_TOP = ["participant", "repository_url", "window", "columns", "grid", "gate", "reference",
-                "cusum", "findings", "fusion", "lifecycle", "watchdog", "ladders", "sda"]
+                "cusum", "findings", "fusion", "episodes", "position", "dips", "watchdog", "ladders", "sda"]
 
 
 def parse_iso(s: str) -> float:
