@@ -7,4 +7,5 @@ COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci
 COPY --chown=node:node . .
 EXPOSE 5173
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+# node_modules lives in an anonymous volume that survives rebuilds; sync it to package-lock.json on start (fast when unchanged)
+CMD ["sh", "-c", "npm install --no-audit --no-fund && exec npm run dev -- --host 0.0.0.0 --port 5173"]

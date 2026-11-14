@@ -84,3 +84,12 @@ def test_stream_and_ui(client, eng):
     eng.stop_event.clear()
     ui = client.get("/ui")
     assert ui.status_code == 200 and "<html" in ui.text and "/status" in ui.text
+
+
+def test_webui_hooks(client):                    # webui hook: /status position fields and /webui/meta
+    s = client.get("/status").json()
+    for tr in s["tractors"].values():
+        assert {"lat", "lon", "cn0", "sats", "fix"} <= set(tr)
+    m = client.get("/webui/meta").json()
+    assert m["tractors"] == ["T1", "T2", "T3"] and m["fusion"]["bf_alarm"] == 20
+    assert m["fusion"]["links"]["F1"]["JAMMING"] == 0.985 and m["window"]["start"]

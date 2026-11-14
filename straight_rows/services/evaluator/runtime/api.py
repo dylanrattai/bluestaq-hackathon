@@ -109,6 +109,11 @@ def create_app(eng: Engine) -> FastAPI:
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    @app.get("/webui/meta")                     # webui hook: static facts for the React UI (services/webui)
+    def webui_meta():
+        from runtime import webui
+        return webui.meta(eng.cfg, eng.tele, eng.sda, eng.out_dir)
+
     @app.get("/ui", response_class=HTMLResponse)
     def ui():
         return UI_HTML.replace("__POLL__", str(int(eng.cfg.get("api", {}).get("ui_poll_ms", 2000))))

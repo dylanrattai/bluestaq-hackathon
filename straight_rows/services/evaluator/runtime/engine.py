@@ -13,6 +13,7 @@ from detect.baseline import siegmund_arl0, solve_h
 from diagnose.confidence import confidence as conf_p, evidence_line, group_states, load_table
 from diagnose.evidence import build_evidence
 from runtime.export import build_submission, resolve_validator, write_submission
+from runtime import webui                      # webui hook (read-only)
 from diagnose.fusion import Fusion
 from ingest.grid import Gate, compute_features
 from detect.inputs import cn0, cross_track, fix, link, s4
@@ -251,6 +252,7 @@ class Engine:
                 per[tr] = {"working": bool(self.ctx.working.get(tr, False)), "present": present, "missing": missing,
                            "explanation": sorted(r.explanation) if r else [], "map_set": sorted(r.map_set) if r else [],
                            "top_bf": [{"cause": c, "bf": round(v, 2), "posterior": round(r.posterior[c], 3)} for c, v in top]}
+                per[tr].update(webui.tractor_now(self.tele, tr, self.now))   # webui hook: lat/lon/cn0/sats/fix for the map and cards
             wd = self.watchdog.runs[-1].as_dict() if self.watchdog.runs else None
             return {"mode": self.mode, "data_time": iso(self.now), "progress": round(prog, 4),
                     "speed": "max" if self.speed is None else self.speed, "batches_done": self.b_done, "batches": self.nb,

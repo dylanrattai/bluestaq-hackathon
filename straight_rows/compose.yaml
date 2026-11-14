@@ -36,7 +36,7 @@ services:
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /app
     ports:
-      - "127.0.0.1:5173:5173"                      # localhost only; open http://localhost:5173
+      - "${WEBUI_BIND:-127.0.0.1}:5173:5173"       # localhost by default; set WEBUI_BIND in .env (e.g. your Tailscale IP) to reach it remotely
     volumes:
       - ./services/webui:/app                      # live source, edits hot-reload
       - /app/node_modules                          # keep the image's node_modules, not the host's
@@ -46,3 +46,4 @@ services:
       HOME: /tmp
       DATA_DIR: /data
       OUT_DIR: /out
+      API_TARGET: http://evaluator:8000             # Vite proxies the evaluator API; unreachable -> the UI runs in DEMO
