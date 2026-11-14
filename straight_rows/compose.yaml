@@ -1,0 +1,30 @@
+x-common: &common
+  user: "${HOST_UID:-1000}:${HOST_GID:-1000}"     # files written to ./out belong to you, not root
+  working_dir: /app
+  environment:
+    HOME: /tmp
+    DATA_DIR: /data
+    OUT_DIR: /app/out
+
+services:
+  evaluator:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/evaluator/Dockerfile
+    image: straight-rows-evaluator
+    volumes:
+      - ./data:/data:ro                           # dataset is mounted, never baked into the image
+      - ./out:/app/out
+
+  webui:
+    <<: *common
+    build:
+      context: .
+      dockerfile: services/webui/Dockerfile
+    image: straight-rows-webui
+    ports:
+      - "127.0.0.1:8000:8000"                     # localhost only
+    volumes:
+      - ./data:/data:ro
+      - ./out:/app/out:ro                         # reads what the evaluator wrote
