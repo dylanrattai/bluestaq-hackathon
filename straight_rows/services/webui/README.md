@@ -20,11 +20,13 @@ with the engine's real tables, recorded episodes and logged Bayes factors.
 
 ## Run
 
+Start the evaluator first (`docker compose up evaluator` from `straight_rows/`, or `python main.py live ...`), then:
+
 ```bash
-docker compose up evaluator webui      # from straight_rows/; open http://localhost:5173
+npm ci && npm run dev      # from services/webui/; open http://localhost:5173
 ```
 
-Without Docker, run `npm install && npm run dev`. Vite proxies the API paths to `API_TARGET`
+Vite proxies the API paths to `API_TARGET`
 (default `http://localhost:8000`), so the evaluator needs no CORS changes.
 
 ## LIVE and DEMO

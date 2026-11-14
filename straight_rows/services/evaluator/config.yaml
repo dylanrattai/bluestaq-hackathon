@@ -3,9 +3,9 @@
 # Nothing here was tuned on the development labels (spec §1 rule 1).
 
 participant:
-  github_handle: "TODO-DYLAN"        # ASK DYLAN: GitHub username (export warns while unchanged)
+  github_handle: "dylanrattai"
   display_name: ""                   # optional
-repository_url: "https://github.com/TODO-DYLAN/straight-rows"   # ASK DYLAN
+repository_url: "https://github.com/dylanrattai/bluestaq-hackathon"
 timezone_local: "America/Chicago"
 
 window:                               # §3.3 evaluation window (confirmed by starter README and validator)

@@ -3,9 +3,9 @@
 # table, two pseudo-episodes), fusion.leaks / fusion.leaks_episode (dev background rates) and the five
 # §9.3 knobs. See out/calibration.md.
 participant:
-  github_handle: TODO-DYLAN
+  github_handle: dylanrattai
   display_name: ''
-repository_url: https://github.com/TODO-DYLAN/straight-rows
+repository_url: https://github.com/dylanrattai/bluestaq-hackathon
 timezone_local: America/Chicago
 window:
   start: '2026-05-06T00:00:00+00:00'

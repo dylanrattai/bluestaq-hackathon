@@ -22,9 +22,24 @@ A full 72 h replay takes about 2.5 minutes on the Orin Nano.
 
 ## 1. Setup and run
 
-Before shipping, set `participant.github_handle` and `repository_url` in
-`services/evaluator/config.yaml` (they ship as `TODO-DYLAN` placeholders; the export logs a red warning until
-they are changed). The dataset lives in `data/` (never modified); all outputs go to `out/`.
+All commands below run from this `straight_rows/` directory. Outputs go to `out/`; the submitted
+`out/submission.json` is committed so a rerun can be compared against it (`diff`).
+
+### Get the data (once)
+
+The dataset is not committed (it is the event's, ~777k rows). Download it with the official starter script from
+the repository root, then link it here:
+
+```bash
+cd ..                                   # repository root
+python starter/scripts/get_data.py      # downloads and checksums into starter/data/
+cd straight_rows
+ln -s ../starter/data data              # or: cp -r ../starter/data data
+ls data                                 # farm/  labels/  sda/
+```
+
+`data/` is read-only to the pipeline (mounted `:ro` in Docker). The submitted file was produced with the physics
+configuration `services/evaluator/config.yaml` (the default).
 
 ### Docker (recommended)
 
@@ -43,7 +58,7 @@ docker run --rm -p 8000:8000 -v "$PWD/data:/data:ro" -v "$PWD/out:/out" -v "$PWD
 Then open <http://localhost:8000/ui>. The process stays up after the replay ends so the final state can be
 browsed until Ctrl-C. `--speed max` runs the live mode without pacing.
 
-### Without Docker (Python 3.11+)
+### Without Docker (Python 3.12)
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -51,7 +66,7 @@ pip install -r services/evaluator/requirements.txt
 cd services/evaluator
 python main.py batch --data ../../data --out ../../out
 python main.py live  --data ../../data --out ../../out --speed 60 --port 8000
-python -m pytest -q                       # 56 tests on synthetic signals with known answers
+python -m pytest -q                       # 83 tests on synthetic signals with known answers
 python main.py batch --dev --data ../../data --out ../../out   # + diagnostic against the development labels
 ```
 
@@ -72,8 +87,21 @@ services/evaluator/
   diagnose/   fusion.py leaky noisy-OR · lifecycle.py alarms · watchdog.py 5-min pass · evidence.py
   runtime/    engine.py replay loop · api.py FastAPI (+ /ui) · export.py submission + checks
   tools/      dev_check.py diagnostic scorer with per-episode explanations
-  tests/      56 pytest tests on synthetic signals only
+  tests/      83 pytest tests on synthetic signals only
+services/webui/               React + Vite operator / judge UI over the evaluator API (optional, for the demo)
 ```
+
+### Web UI (optional, demo)
+
+With the evaluator running in live mode on :8000 (above), in a second terminal (Node 20+):
+
+```bash
+cd services/webui
+npm ci                     # exact versions from package-lock.json
+npm run dev                # open http://localhost:5173 (proxies the API to http://localhost:8000)
+```
+
+See `services/webui/README.md` for the pages and keyboard shortcuts.
 
 ### Checking the pipeline against the development labels
 
@@ -115,7 +143,7 @@ time never enters the output, confidences are rounded to 3 decimals and times to
 PARKED (speed < 0.5 m/s for ≥ 5 min) or WORKING (speed > 0.5 m/s for ≥ 30 s); it holds its last state while the
 fix is AUTONOMOUS/NO_FIX or a cross-track drift is active, because a degraded or spoofed position can fake motion.
 Findings are computed while parked too, but detections are clipped to working time and a fully parked alarm is
-retracted (`PARKED`); an alarm that spans a parked night is split into one detection per working segment.
+retracted (`PARKED`); an alarm that would span a parked night is ended by the 10-batch close rule instead (§8).
 
 **Reference and CUSUM.** Level changes are detected with tabular CUSUMs on *batch means*, not raw 1 Hz data
 (raw autocorrelated data over-alarms [R5–R7]). The reference (mean, std of clean batch means over the trailing
@@ -225,7 +253,15 @@ the site's dip rate (≤ 0.95); they are ISA-18.2 suppressed alerts (not in `/al
 *No spoof under jam*: a position episode whose onset falls in a JAMMING detection on the same tractor (±5 min) with
 F1 present is explained away. *Jam inside a storm*: a ≥ 6 dB flat step of 1-min mean C/N0 on a ≤ 40 dB-Hz floor on
 ≥ 2 tractors for ≥ 3 min is its own JAMMING detection. *Storm rules*: SPACE_WEATHER needs F1 on ≥ 2 tractors; an
-advisory alone does not make F9. Dev: 37.5/40 (strict multipath-duplicate reading), 40.0 (lenient).
+advisory alone does not make F9. Dev: 37.5/40 (strict multipath-duplicate reading), 40.0 (lenient). This is
+in-sample: the site map was fitted on the same dev days (see §5 table).
+
+*Why the submission has ~475 MULTIPATH reports.* Every working pass through the mapped headland site with a dip
+becomes one ≤ 30 s, one-tractor report (operationally: "expected reflection at the north headland, keep going").
+The official diagnostic exempts recurrent multipath reports of ≤ 3 min from extra-detection penalties, except
+duplicates that overlap the scored representative window, so these cost little; they are kept because each one
+tells the operator a specific dip was the known reflection and not a new fault. On dev the strict reading of that
+duplicate rule costs 2.5 points (37.5 vs 40.0).
 
 ## 5. Use of labelled data
 
@@ -253,13 +289,16 @@ every number):
   (29.5 in-sample and LOEO, the same as physics).
 - **Not learned**: no new findings, tracks or classes; confidence is the network posterior, not recalibrated on 12
   episodes. MULTIPATH: the two labelled dips are indistinguishable from the ~1000 headland-turn dips (best feature
-  pair separates 89% < 95%), so no gate was added and no MULTIPATH is exported.
+  pair separates 89% < 95%), so no per-dip gate was added. Instead (v2.3) `tools/fit_sites.py` learns *where* dips
+  recur from dev telemetry alone (dip rate per 15 m cell over working passes; it does not read the labels), and
+  dips at those sites are exported as MULTIPATH (§4).
 
 | version | dev score /40 in-sample | LOEO |
 |---|---|---|
 | v1.1 | 18.9 | 18.9 (nothing learned) |
 | v2.1-physics (`config.yaml`) | 29.5 | 29.5 (nothing learned) |
 | v2.1-trained (`config_trained.yaml`) | 31.8 | 23.0 |
+| v2.3 (`config.yaml` + `multipath_sites.yaml`, **submitted**) | 37.5 (40.0 lenient) | not run; site map fitted on dev telemetry |
 
 ## 6. Known failure modes
 
@@ -275,7 +314,9 @@ every number):
   cause wins on that machine, not both (only a stacked step splits a signal episode).
 - A level that settles permanently below the pre-episode reference keeps an episode open until the 6 h safety
   valve closes it unattributed and rebuilds that tractor's reference.
-- MULTIPATH is not exported: the labelled dips sit on headland turns and look like every other turn dip.
+- MULTIPATH relies on a site map learned on dev: a reflector somewhere new (not at the mapped headland) is not
+  reported as MULTIPATH, and a site dip whose duplicate overlaps the scored representative window costs precision.
+  The labelled dips sit on headland turns and look like every other turn dip, so location is the only separator.
 - A jam inside a storm (TRN-05) needs an abrupt stacked step on ≥ 2 tractors; the physics table misses it.
 - A short multipath dip that straddles a batch boundary moves two batch means, opens a 2-batch signal episode, and
   is then excluded from the short-dip track (`out/dips.csv` lists such dips as excluded by a signal episode).
@@ -292,7 +333,6 @@ of GNSS.
 
 ## 8. Decisions and open items
 
-- **ASK DYLAN:** `participant.github_handle` and `repository_url` in `config.yaml`.
 - The ALARM rule uses the most probable *non-empty* cause set: with a 1% prior the empty set stays the literal MAP
   until a posterior exceeds 0.5, which would contradict the spec's own sanity targets (e.g. F5 ⇒ MULTIPATH).
 - Update v2 replaces the frozen-reference max-age pause: references freeze per farm episode and are discarded at
