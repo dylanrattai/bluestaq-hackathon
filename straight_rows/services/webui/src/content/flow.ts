@@ -9,7 +9,63 @@ export interface Block {
   why: string
   how: string[]
   refs: string[]
+  plain?: { title: string; steps: string[]; eq: string[] }   // the equation, step by step in plain English
+  rules?: [string, string, string][]                          // [id, name, when it is present]
 }
+
+/* The equations as the engine implements them (detect/baseline.py CusumChannel, diagnose/fusion.py / noisyor.ts). */
+const CUSUM_PLAIN = {
+  title: 'The CUSUM, in plain English',
+  steps: [
+    'Every 30 s, average the 30 one-second readings of a channel (for example mean C/N0) into one number, x.',
+    'Learn what "normal" looks like: the average μ and spread σ of the clean 30 s averages over the last 60 min. Neighbouring averages are correlated, so σ is widened by √((1 + ρ)/(1 − ρ)), where ρ is the correlation between one average and the next, capped at 3×.',
+    'Turn each new average into a score of how unusual it is: z = (x − μ) / σ, that is, how many standard deviations it sits from normal.',
+    'Keep a running total S, starting at 0. Each batch, add how far it is below normal beyond a half-σ allowance: S = max(0, S − z − 0.5). A normal batch shrinks S by about 0.5; a batch 2σ low grows it by 1.5. It can never go below zero.',
+    'Raise the finding when S reaches h ≈ 6.80. One huge drop or a run of small ones both get there; a single noisy batch does not.',
+    'The onset is the batch where S last left zero (not the batch where it crossed h), so the reported start is when the change actually began.',
+    'h is not tuned: it is solved from Siegmund\'s formula so that, on normal data, a false alarm happens on average once per 24 h per channel (2880 batches).',
+    'The event ends as soon as a batch is back within ±2σ of the old normal, or when an in-event recovery CUSUM sees the level settle.',
+  ],
+  eq: [
+    'z_t = (x_t − μ) / σ_eff,   σ_eff = σ · min(3, √((1 + ρ)/(1 − ρ)))',
+    'S_t = max(0, S_{t−1} − z_t − k),   k = 0.5          (rise channels: S_t = max(0, S_{t−1} + z_t − k))',
+    'alarm when S_t ≥ h;   ARL₀(h) = (e^{2kb} − 2kb − 1) / (4k²),  b = h + 1.166,  ARL₀ = 2880  →  h ≈ 6.80',
+  ],
+}
+
+const NOISY_OR_PLAIN = {
+  title: 'The noisy-OR, in plain English',
+  steps: [
+    'Each cause, acting alone, has a fixed chance of making each finding appear: the link, P(finding | cause). For example jamming makes a C/N0 drop (F1) appear 98.5% of the time; spoofing only 2.5%.',
+    'A finding can also appear with no cause at all (noise, an odd reading): the leak, 2.5% (20% for F9 space-weather context).',
+    'A weak finding counts for less: its link is scaled by 0.4 + 0.6 × severity, so a barely-there sign carries 40% of its full weight.',
+    'Each active cause gets its own independent chance to "switch the finding on". The finding stays off only if the leak and every active cause all fail to switch it on, so P(off) = (1 − leak) × the product of (1 − link) over the active causes, and P(on) = 1 − P(off). That "any one of them is enough" is the OR; the "fails sometimes" is the noisy part.',
+    'A finding with no information (for example cross-track error while the fix is DGPS) is skipped: it neither helps nor hurts any cause. That is different from "absent", which counts against causes that should have produced it.',
+    'There are 6 causes (the 5 classes plus OTHER), so 2⁶ = 64 possible combinations of causes, including "nothing is wrong" and "two things at once". Each combination is scored exactly: its prior (each cause 1%) times the probability of every observed finding.',
+    'The chance a cause is active is the share of the total score held by the combinations that include it. Because the combinations compete, one cause that explains everything pushes the others down (explaining away).',
+    'The Bayes factor says how much the evidence moved the odds: BF = (posterior odds) / (prior odds). BF ≥ 3 gives a WATCH; BF ≥ 20 gives an ALARM, but only if the cause is in the single most likely non-empty combination.',
+  ],
+  eq: [
+    'P(f absent | H) = (1 − leak_f) · Π_{c ∈ H} (1 − link_{f,c} · (0.4 + 0.6 · s_f))        P(f present | H) = 1 − P(f absent | H)',
+    'score(H) = Π_c 0.01^{[c ∈ H]} · 0.99^{[c ∉ H]} · Π_{f observed} P(f | H)        (all 64 cause sets H)',
+    'P(c | findings) = Σ_{H ∋ c} score(H) / Σ_H score(H);   BF_c = [P / (1 − P)] / [0.01 / 0.99];   WATCH ≥ 3, ALARM ≥ 20',
+  ],
+}
+
+const FINDING_RULES: [string, string, string][] = [
+  ['F1', 'C/N0 level drop', 'The lower CUSUM on the tractor\'s 30 s mean C/N0 reaches h ≈ 6.80: the signal got sustainably weaker than its own last hour.'],
+  ['F2', 'C/N0 oscillation', 'The upper CUSUM on the log-variance of C/N0 inside each 30 s batch reaches h: the signal is flickering more than normal. During an open drop it is compared with the drop\'s own flicker, so only extra flicker counts. Headland-turn batches carry no information.'],
+  ['F3', 'Equal drop on all tractors', 'Every working tractor dropped and their drops are within 3 dB of each other. A regional cause (the ionosphere) hits everyone the same.'],
+  ['F4', 'Unequal drop on ≥ 2 tractors', 'At least two tractors dropped and their drops differ by more than 6 dB, one doubling of distance from a local transmitter under inverse-square spreading. Points to a jammer near one machine.'],
+  ['F5', 'Short dip', 'The 5 s moving average of min (or mean) C/N0 falls at least max(3 dB, 4σ) below the 2 min median that ended 30 s earlier, and recovers within 60 s. A brief reflection, not an outage.'],
+  ['F6', 'Fix or satellites degraded, C/N0 normal', 'The fix leaves RTK, or the tractor uses ≥ 2 fewer satellites than its reference, while signal strength is normal. A fix drop within 4 min of a correction-link loss belongs to F7 instead.'],
+  ['F7', 'Correction link down', 'In the last 5 min the RTK base link was down for ≥ 30 s in total, or dropped out ≥ 3 separate times.'],
+  ['F8', 'Cross-track drift', 'The upper CUSUM on the batch median cross-track error (while moving, headland turns masked) reaches h: the machine is drifting off its line. No information while the fix is DGPS or worse; in RTK float only beyond 0.5 m.'],
+  ['F9', 'Space weather active', 'Kp ≥ 7, Dst ≤ −100 nT, or regional S4 ≥ 0.3. An advisory alone only counts when all three index feeds are stale.'],
+  ['F10', 'RFI report covers the tractor', 'An interference report is already available (its event time + 30 min, since reports arrive late), its uncertainty ellipse (semi-major axis as radius) contains the tractor, and its time is within ±30 min of the batch.'],
+  ['F11', 'Stacked step', 'Inside an already-open drop, a second CUSUM against the in-event level crosses h within 2 batches: an abrupt extra drop on top (a jammer switching on during a storm). On ≥ 2 tractors it opens a sub-episode.'],
+  ['F12', 'Machine-specific', 'Over the episode, every other working tractor had F1 in fewer than 10% of its batches and no episode of its own: only this machine is affected. The position track uses the same test on cross-track drift.'],
+]
 
 export const BLOCKS: Block[] = [
   {
@@ -46,18 +102,19 @@ export const BLOCKS: Block[] = [
       'An in-event reference drives recovery and stacked-step CUSUMs.',
     ],
     refs: ['R1', 'R2', 'R3', 'R8', 'R9'],
+    plain: CUSUM_PLAIN,
   },
   {
     id: 'findings', title: 'Findings F1–F12', sub: 'present / absent / no information + severity', lane: 'detect',
     what: 'Twelve findings per tractor per batch, each with a severity in [0, 1] from a 5-level ladder (L0..L4, s = L/4).',
     why: 'Discrete, explainable signs are what the diagnosis network and the evidence strings are built from.',
     how: [
-      'F1 C/N0 level drop. F2 C/N0 oscillation. F3 equal drop on all tractors. F4 unequal drop on ≥ 2 tractors. F5 short dip (5 s FMA test).',
-      'F6 fix/satellites degraded while C/N0 is normal. F7 correction link down. F8 cross-track drift. F9 space weather active.',
-      'F10 an available RFI report covers the tractor. F11 stacked step (opens a sub-episode). F12 machine-specific.',
+      'Each finding is present, absent, or missing for every tractor and batch. The full rule for each one is in the table below.',
+      'F1, F2 and F8 use the CUSUM from stage 03. F3, F4 and F12 compare tractors with each other. F9 and F10 come from the SDA feeds.',
       '"Missing" (no information) is different from "absent". A missing finding is skipped, never counted against a cause.',
     ],
     refs: ['R4', 'R10', 'R15', 'R16', 'R18', 'R19', 'R20', 'R21'],
+    rules: FINDING_RULES,
   },
   {
     id: 'episodes', title: 'Episodes first', sub: 'signal · sub · position · short dip', lane: 'decide',
@@ -84,6 +141,7 @@ export const BLOCKS: Block[] = [
       'OTHER, or a group below BF 20, is logged as unattributed and never exported.',
     ],
     refs: ['R22', 'R23', 'R24', 'R25', 'R26', 'R27'],
+    plain: NOISY_OR_PLAIN,
   },
   {
     id: 'v23', title: 'v2.3 accuracy rules', sub: 'site multipath · spoof-under-jam · storm-jam', lane: 'decide',

@@ -72,6 +72,14 @@ function DataFlow({ farm }: { farm: Farm }) {
             <div><div className="k">WHY</div><p>{b.why}</p></div>
             <div><div className="k">HOW</div><ul>{b.how.map((h, i) => <li key={i}>{h}</li>)}</ul></div>
           </div>
+          {b.rules && <><div className="k">THE {b.rules.length} RULES · WHEN EACH FINDING IS PRESENT</div>
+            <table className="t rules"><tbody>{b.rules.map(([id, name, rule]) => (
+              <tr key={id}><td className="m id">{id}</td><td className="nm">{name}</td><td>{rule}</td></tr>
+            ))}</tbody></table></>}
+          {b.plain && <><div className="k">{b.plain.title.toUpperCase()}</div>
+            <ol className="plain">{b.plain.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+            <div className="k">THE SAME THING AS AN EQUATION</div>
+            <pre className="eq">{b.plain.eq.join('\n')}</pre></>}
           {sel === 'network' && farm.meta && <><div className="k">LINKS AND LEAKS · LIVE FROM THE ENGINE CONFIG</div><LinkTable fu={farm.meta.fusion} /></>}
           <div className="k">RESEARCH</div>
           <ul className="refs">{b.refs.map((r) => { const [t, u] = REFS[r] ?? [r, '']; return <li key={r}><span className="mono">{r}</span>{u ? <a href={u} target="_blank" rel="noreferrer">{t}</a> : t}</li> })}</ul>

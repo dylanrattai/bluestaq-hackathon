@@ -1,6 +1,6 @@
 // Palette and wording shared by both pages (hex, so SVG and alpha suffixes like `${c}55` work)
 export const CV: Record<string, string> = {
-  SPACE_WEATHER: '#9d85f2', JAMMING: '#e5534b', SPOOFING: '#f08c3a', EQUIPMENT_FAULT: '#4fc1b9',
+  SPACE_WEATHER: '#9d85f2', JAMMING: '#e5534b', SPOOFING: '#f08c3a', EQUIPMENT_FAULT: '#e85fc4',
   MULTIPATH: '#8b8579', OTHER: '#6b645a', OK: '#7dbbe0',
 }
 export const CLS_COLOR = CV
